@@ -3054,6 +3054,7 @@ if(CLIENT)
     tile_art.cpp
   )
   set_src(GAME_MAP GLOB_RECURSE src/game/map
+    entity_regions.h
     envelope_extrema.cpp
     envelope_extrema.h
     envelope_manager.h
@@ -3066,6 +3067,7 @@ if(CLIENT)
     render_layer.h
     render_map.cpp
     render_map.h
+    rounded_tiles.h
   )
   set(GAME_GENERATED_CLIENT
     src/generated/checksum.cpp
@@ -3642,6 +3644,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     os_test.cpp
     packer_test.cpp
     prng_test.cpp
+    rounded_tiles_test.cpp
     score_test.cpp
     secure_random_test.cpp
     server_test.cpp

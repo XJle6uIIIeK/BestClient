@@ -26,6 +26,8 @@ MACRO_CONFIG_STR(BcBlockedContentPartialReplacementChar, bc_blocked_content_part
 MACRO_CONFIG_INT(BcAutoUpdate, bc_auto_update, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Automatically download and apply updates on startup")
 
 // General visuals
+MACRO_CONFIG_INT(BcEntitiesRounding, bc_entities_rounding, 0, 0, 100, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Entity contour rounding in percent (0 = square, 100 = circle)")
+MACRO_CONFIG_INT(BcEntitiesRoundingMode, bc_entities_rounding_mode, 2, 0, 2, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Entity rounding corners (0 = outer, 1 = inner, 2 = both)")
 MACRO_CONFIG_INT(BcChatSaveDraft, bc_chat_save_draft, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Keep unfinished chat input when closing chat")
 MACRO_CONFIG_INT(BcSilentTyping, bc_silent_typing, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Hide PLAYERFLAG_CHATTING from others while typing")
 MACRO_CONFIG_INT(BcChatAltCommandLayout, bc_chat_alt_command_layout, 0, 0, 1, CFGFLAG_CLIENT | CFGFLAG_SAVE, "Interpret slash chat commands typed in the Russian keyboard layout")

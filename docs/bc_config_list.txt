@@ -100,6 +100,8 @@ bc_dynamic_fov
 bc_dynamic_fov_amount
 bc_dynamic_fov_smoothness
 bc_enable_censor_list
+bc_entities_rounding
+bc_entities_rounding_mode
 bc_extend_zoom
 bc_f_input_amount
 bc_f_input_others

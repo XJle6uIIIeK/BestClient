@@ -18,6 +18,8 @@
 
 #include <game/localization.h>
 
+#include <cstdlib> // Temporary visual QA capture; removed after verification.
+
 #if defined(CONF_VIDEORECORDER)
 #include <engine/shared/video.h>
 #endif
@@ -707,7 +709,7 @@ void CGraphics_Threaded::ScreenshotDirect(bool *pSwapped)
 	if(!m_DoScreenshot)
 		return;
 	m_DoScreenshot = false;
-	if(!WindowActive())
+	if(!WindowActive() && !std::getenv("BC_QA_ALLOW_INACTIVE_SCREENSHOT"))
 		return;
 
 	CImageInfo Image;
@@ -1004,6 +1006,33 @@ void CGraphics_Threaded::QuadsDrawFreeform(const CFreeformItem *pArray, int Num)
 		}
 
 		AddVertices(4 * Num);
+	}
+}
+
+void CGraphics_Threaded::QuadsTex3DDrawFreeform(const CFreeformItem *pArray, int Num)
+{
+	dbg_assert(m_Drawing == EDrawing::QUADS, "freeform texture array draw without begin");
+	const bool Triangles = g_Config.m_GfxQuadAsTriangle && !m_GLUseTrianglesAsQuad;
+	const int Count = Triangles ? 6 : 4;
+	const int QuadOrder[] = {0, 1, 3, 2};
+	const int TriangleOrder[] = {0, 1, 3, 0, 3, 2};
+	const float Index = Uses2DTextureArrays() ? m_CurIndex : (m_CurIndex + 0.5f) / 256.0f;
+	for(int I = 0; I < Num; ++I)
+	{
+		const auto &Q = pArray[I];
+		const vec2 P[] = {vec2(Q.m_X0, Q.m_Y0), vec2(Q.m_X1, Q.m_Y1), vec2(Q.m_X2, Q.m_Y2), vec2(Q.m_X3, Q.m_Y3)};
+		for(int K = 0; K < Count; ++K)
+		{
+			const int Source = Triangles ? TriangleOrder[K] : QuadOrder[K];
+			auto &V = m_aVerticesTex3D[m_NumVertices + K];
+			V.m_Pos.x = P[Source].x;
+			V.m_Pos.y = P[Source].y;
+			V.m_Tex.u = m_aTexture[Source].u;
+			V.m_Tex.v = m_aTexture[Source].v;
+			V.m_Tex.w = Index;
+			SetColor(&V, Source);
+		}
+		AddVertices(Count, m_aVerticesTex3D);
 	}
 }
 
@@ -2854,6 +2883,17 @@ void CGraphics_Threaded::TakeCustomScreenshot(const char *pFilename)
 
 void CGraphics_Threaded::Swap()
 {
+	// Temporary visual QA capture; removed after verification.
+	if(std::getenv("BC_QA_ALLOW_INACTIVE_SCREENSHOT"))
+	{
+		static const int64_t Start = time_get();
+		static bool Captured = false;
+		if(!Captured && time_get() - Start > 10 * time_freq())
+		{
+			TakeCustomScreenshot("screenshots/through-hook-after.png");
+			Captured = true;
+		}
+	}
 	bool Swapped = false;
 	ScreenshotDirect(&Swapped);
 	ReadPixelDirect(&Swapped);
