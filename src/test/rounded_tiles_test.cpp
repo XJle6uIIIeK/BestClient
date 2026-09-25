@@ -90,18 +90,33 @@ TEST(EntityRegions, RoundingMaskOnlyIncludesTheSameVisibleCategory)
 	EXPECT_EQ(Regions.BlockerMask(1, 1, CEntityRegions::FREEZE), 1u << 4);
 }
 
-TEST(EntityRegions, ThroughHookOverlayKeepsItsOwnSquareTexture)
+TEST(EntityRegions, ThroughHookOverlaySharesTheRoundedSolidSilhouette)
 {
 	CEntityRegions Regions;
 	Regions.m_Width = Regions.m_Height = 1;
 	Regions.m_vTypes = {CEntityRegions::SOLID};
 	Regions.m_vTopLayers = {0};
 	EXPECT_TRUE(Regions.ShouldRoundTile(0, 0, 0, TILE_SOLID));
-	EXPECT_FALSE(Regions.ShouldRoundTile(0, 0, 1, TILE_THROUGH));
-	EXPECT_FALSE(Regions.ShouldRoundTile(0, 0, 1, TILE_THROUGH_CUT));
+	EXPECT_TRUE(Regions.ShouldRoundTile(0, 0, 1, TILE_THROUGH));
+	EXPECT_TRUE(Regions.ShouldRoundTile(0, 0, 1, TILE_THROUGH_CUT));
+	EXPECT_TRUE(Regions.ShouldRoundTile(0, 0, 1, TILE_THROUGH_ALL));
+	EXPECT_TRUE(Regions.ShouldRoundTile(0, 0, 1, TILE_THROUGH_DIR));
+	const auto Rounded = RoundedTiles::Build(0, 16, 2, 16);
+	EXPECT_LT(Area(Rounded), 850.0f);
+	EXPECT_NEAR(Area(Rounded, true), 1.0f, 0.001f);
 	Regions.m_vTopLayers = {1};
 	EXPECT_FALSE(Regions.ShouldRoundTile(0, 0, 0, TILE_SOLID));
+	EXPECT_FALSE(Regions.ShouldRoundTile(0, 0, 1, TILE_THROUGH));
 	EXPECT_TRUE(Regions.ShouldRoundTile(0, 0, 1, TILE_NOHOOK));
+}
+
+TEST(EntityRegions, ThroughOverlayDoesNotSuppressAdjacentJunctions)
+{
+	CEntityRegions Regions;
+	Regions.m_Width = Regions.m_Height = 3;
+	Regions.m_vTypes.assign(9, CEntityRegions::FREEZE);
+	Regions.m_vTypes[4] = CEntityRegions::SOLID;
+	EXPECT_NE(Regions.ComplementCorners(1, 1), 0u);
 }
 
 TEST(EntityRegions, VisibleTeleporterSuppressesCoveredUnfreezeOutline)

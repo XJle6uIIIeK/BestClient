@@ -30,6 +30,8 @@ Shapes are cached by neighborhood. Buffered tiles use a fixed four-step corner m
 
 Outlines use the distance band inside the same contour, clipped to a disjoint tessellation to avoid double alpha at joins. Cached quad containers are reused by neighborhood and width. Straight walls use a smaller rectangular mesh. Map changes, shutdown and rounding changes release these containers.
 
+Front-layer through/through-cut artwork and the entity tile beneath it share the same rounded silhouette. Their texture coordinates still cover the complete source tile, preserving the striped artwork through the bend. Straight outline segments ending at an adjacent arc use flat tangent caps instead of protruding past the arc.
+
 ## Verification
 
 `src/test/rounded_tiles_test.cpp` is registered with the existing GTest runner. It covers disabled geometry, the maximum-radius circle, full UV coverage, concave junction area, all neighborhood patterns and modes, shared-edge continuity, outline area and the detail error bound.

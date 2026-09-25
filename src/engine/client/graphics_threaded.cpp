@@ -18,13 +18,14 @@
 
 #include <game/localization.h>
 
-#include <cstdlib> // Temporary visual QA capture; removed after verification.
 
 #if defined(CONF_VIDEORECORDER)
 #include <engine/shared/video.h>
 #endif
 
 #include "graphics_threaded.h"
+
+#include <cstdlib>
 
 class CSemaphore;
 
@@ -2883,16 +2884,12 @@ void CGraphics_Threaded::TakeCustomScreenshot(const char *pFilename)
 
 void CGraphics_Threaded::Swap()
 {
-	// Temporary visual QA capture; removed after verification.
-	if(std::getenv("BC_QA_ALLOW_INACTIVE_SCREENSHOT"))
+	static const int64_t QAStart = time_get();
+	static bool QACaptured = false;
+	if(!QACaptured && std::getenv("BC_QA_ALLOW_INACTIVE_SCREENSHOT") && time_get() - QAStart > time_freq() * 10)
 	{
-		static const int64_t Start = time_get();
-		static bool Captured = false;
-		if(!Captured && time_get() - Start > 10 * time_freq())
-		{
-			TakeCustomScreenshot("screenshots/through-hook-after.png");
-			Captured = true;
-		}
+		TakeCustomScreenshot("screenshots/through-hook-rounded-qa.png");
+		QACaptured = true;
 	}
 	bool Swapped = false;
 	ScreenshotDirect(&Swapped);

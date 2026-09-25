@@ -611,8 +611,16 @@ const RoundedTiles::CShape *CRenderLayerTile::RoundedShape(int X, int Y, int Ind
 {
 	if(!m_pEntityRegions || m_RoundingPercent <= 0 || !Index)
 		return nullptr;
-	// Only the visible material owns the rounded mesh. Front-layer through
-	// tiles may cover a solid but must keep their original square artwork.
+	if(X == 27 && Y == 9 && m_RoundingLayer == 1)
+	{
+		static bool Logged = false;
+		if(!Logged)
+		{
+			Logged = true;
+			dbg_msg("round-qa", "front index=%d top=%d type=%d should=%d mask=%u", Index, m_pEntityRegions->TopLayer(X, Y), m_pEntityRegions->Get(X, Y), m_pEntityRegions->ShouldRoundTile(X, Y, m_RoundingLayer, Index), m_pEntityRegions->Mask(X, Y, m_pEntityRegions->Get(X, Y)));
+		}
+	}
+	// A front-layer through tile and the game tile beneath it share a mesh.
 	if(!m_pEntityRegions->ShouldRoundTile(X, Y, m_RoundingLayer, Index))
 		return nullptr;
 	const int Type = m_pEntityRegions->Get(X, Y);
@@ -624,7 +632,7 @@ const RoundedTiles::CShape *CRenderLayerTile::RoundedShape(int X, int Y, int Ind
 	if(Mask == 255)
 		return nullptr;
 	const int Steps = m_BuildingRoundingBuffer ? BufferedRoundingSteps : m_RoundingSteps;
-	const unsigned Key = Mask | (Blockers << 8) | (unsigned(Steps) << 16) | (Transition << 23);
+	const uint64_t Key = uint64_t(Mask) | (uint64_t(Blockers) << 8) | (uint64_t(Steps) << 16) | (uint64_t(Transition) << 23);
 	auto It = m_RoundedShapes.find(Key);
 	if(It == m_RoundedShapes.end())
 		It = m_RoundedShapes.emplace(Key, RoundedTiles::Build(Mask, m_RoundingPercent * 0.16f, m_RoundingMode, Steps, Blockers, Transition)).first;
@@ -636,20 +644,12 @@ float CRenderLayerTile::RoundedOverlayScale(int X, int Y) const
 	if(!m_pEntityRegions || m_RoundingPercent <= 0 || m_RoundingMode == 1)
 		return 1.0f;
 	const int Type = m_pEntityRegions->Get(X, Y);
-	if(!Type)
+	if(Type != CEntityRegions::TELE && Type != CEntityRegions::SWITCH)
 		return 1.0f;
-	const unsigned Mask = m_pEntityRegions->Mask(X, Y, Type);
-	const unsigned Blockers = m_pEntityRegions->BlockerMask(X, Y, Type);
-	const unsigned Complement = m_pEntityRegions->ComplementCorners(X, Y);
-	const float Radius = m_RoundingPercent * 0.16f;
-	for(const ivec2 Corner : {ivec2(-1, -1), ivec2(1, -1), ivec2(1, 1), ivec2(-1, 1)})
-	{
-		const int Index = Corner.x < 0 ? (Corner.y < 0 ? 0 : 3) : (Corner.y < 0 ? 1 : 2);
-		const auto C = RoundedTiles::Corner(Mask, Corner.x, Corner.y, Radius, Complement & (1u << Index) ? 2 : m_RoundingMode, Complement & (1u << Index) ? 0 : Blockers);
-		if(C.m_Active && !C.m_Inner)
-			return 1.0f - (1.0f - std::sqrt(0.5f)) * Radius / 16.0f;
-	}
-	return 1.0f;
+	// A text size chosen per tile makes a number in the middle of a teleporter
+	// region much larger than the same number on its rounded end. Use one size
+	// for the whole region so labels stay consistent as the contour bends.
+	return 1.0f - (1.0f - std::sqrt(0.5f)) * (m_RoundingPercent / 100.0f);
 }
 
 void CRenderLayerTile::RenderRoundedTiles(const ColorRGBA &Color, const CRenderLayerParams &Params)
@@ -693,6 +693,7 @@ void CRenderLayerTile::RenderRoundedTiles(const ColorRGBA &Color, const CRenderL
 			const auto *pShape = X == MX && Y == MY ? RoundedShape(X, Y, Index) : nullptr;
 			if(!pShape)
 				pShape = &Square;
+			const bool ThroughArtwork = m_RoundingLayer == 1 && CEntityRegions::IsThrough(Index);
 			const unsigned TableFlag = (Flags & (TILEFLAG_XFLIP | TILEFLAG_YFLIP)) + ((Flags & TILEFLAG_ROTATE) >> 1);
 			const auto &T = TEX_COORDS_TABLE[TableFlag];
 			for(const auto &Q : pShape->m_vQuads)
@@ -702,7 +703,12 @@ void CRenderLayerTile::RenderRoundedTiles(const ColorRGBA &Color, const CRenderL
 				{
 					// Array/volume samplers clamp extrapolated corner UVs per fragment.
 					// The atlas fallback cannot do that without sampling adjacent tiles.
-					const vec2 SampleUv = Arrays ? Q.m_SampleUv[K] : vec2(std::clamp(Q.m_SampleUv[K].x, 0.0f, 1.0f), std::clamp(Q.m_SampleUv[K].y, 0.0f, 1.0f));
+					// Inner arcs add area outside the original cell. Sampling by
+					// position clamps a through tile's diagonal stripes to a single
+					// edge texel there. Stretch its complete source patch over that
+					// added area instead, as for an outer rounded corner.
+					const vec2 SourceUv = ThroughArtwork ? Q.m_Uv[K] : Q.m_SampleUv[K];
+					const vec2 SampleUv = Arrays ? SourceUv : vec2(std::clamp(SourceUv.x, 0.0f, 1.0f), std::clamp(SourceUv.y, 0.0f, 1.0f));
 					UV[K] = RoundedTiles::Bilinear({vec2(T.m_aTexX[0], T.m_aTexY[0]), vec2(T.m_aTexX[1], T.m_aTexY[1]), vec2(T.m_aTexX[2], T.m_aTexY[2]), vec2(T.m_aTexX[3], T.m_aTexY[3])}, SampleUv.x, SampleUv.y);
 					if(!Arrays)
 						UV[K] = (vec2(Index % 16, Index / 16) + vec2(Inset, Inset) + UV[K] * (1 - 2 * Inset)) / 16.0f;
@@ -869,6 +875,7 @@ void CRenderLayerTile::UploadTileData(std::optional<CTileLayerVisuals> &VisualsO
 			const auto *pShape = CurOverlay == 0 ? RoundedShape(x, y, Index) : nullptr;
 			if(pShape)
 			{
+				const bool ThroughArtwork = m_RoundingLayer == 1 && CEntityRegions::IsThrough(Index);
 				CGraphicTile Base;
 				CGraphicTileTextureCoords Tex;
 				FillTmpTile(&Base, &Tex, Flags, Index, x, y, ivec2(0, 0), 32);
@@ -881,7 +888,10 @@ void CRenderLayerTile::UploadTileData(std::optional<CTileLayerVisuals> &VisualsO
 					{
 						vec4 U[4];
 						for(int K = 0; K < 4; ++K)
-							U[K] = mix(mix(T[0], T[1], Q.m_SampleUv[K].x), mix(T[3], T[2], Q.m_SampleUv[K].x), Q.m_SampleUv[K].y);
+						{
+							const vec2 SourceUv = ThroughArtwork ? Q.m_Uv[K] : Q.m_SampleUv[K];
+							U[K] = mix(mix(T[0], T[1], SourceUv.x), mix(T[3], T[2], SourceUv.x), SourceUv.y);
+						}
 						vTmpTileTexCoords.push_back({U[0], U[1], U[2], U[3]});
 					}
 				}

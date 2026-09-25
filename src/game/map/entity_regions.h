@@ -27,6 +27,10 @@ public:
 	std::vector<int> m_vTypes;
 	std::vector<int> m_vRegionKeys;
 	std::vector<unsigned char> m_vTopLayers;
+	static bool IsThrough(int Index)
+	{
+		return Index == TILE_THROUGH || Index == TILE_THROUGH_CUT || Index == TILE_THROUGH_ALL || Index == TILE_THROUGH_DIR;
+	}
 
 	static int Category(int Index)
 	{
@@ -107,15 +111,20 @@ public:
 
 	bool ShouldRoundTile(int X, int Y, int Layer, int Index) const
 	{
-		if(Index == 0 || Layer != TopLayer(X, Y))
+		if(Index == 0)
 			return false;
 		const int Type = Get(X, Y);
+		// A front-layer through tile is translucent artwork laid over the game
+		// tile. Both layers must use the same silhouette, otherwise the square
+		// front sprite crosses the curved solid outline (or exposes a wedge).
+		if(Layer == 1 && TopLayer(X, Y) == 0 && Type != NONE && IsThrough(Index))
+			return true;
+		if(Layer != TopLayer(X, Y))
+			return false;
 		if(Layer == 2)
 			return Type == TELE;
 		if(Layer == 3)
 			return Type == SWITCH;
-		// Through and through-cut tiles in the front layer can cover a solid
-		// without becoming its material. They must retain their own square UVs.
 		return Type != NONE && Category(Index) == Type;
 	}
 

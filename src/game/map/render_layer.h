@@ -158,7 +158,7 @@ protected:
 	int m_RoundingPercent = -1, m_RoundingMode = -1, m_RoundingSteps = 2;
 	bool m_BuildingRoundingBuffer = false;
 	static constexpr int BufferedRoundingSteps = 4;
-	std::unordered_map<unsigned, RoundedTiles::CShape> m_RoundedShapes;
+	std::unordered_map<uint64_t, RoundedTiles::CShape> m_RoundedShapes;
 	void UpdateRounding();
 	const RoundedTiles::CShape *RoundedShape(int X, int Y, int Index);
 	float RoundedOverlayScale(int X, int Y) const;
