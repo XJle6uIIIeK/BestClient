@@ -1,5 +1,7 @@
 #include "trails.h"
 
+#include <base/dbg.h>
+
 #include <engine/graphics.h>
 #include <engine/shared/config.h>
 
@@ -66,14 +68,12 @@ void CTrails::OnRender()
 		else
 			m_HistoryValid[ClientId] = true;
 
-		CTeeRenderInfo TeeInfo = GameClient()->m_aClients[ClientId].m_RenderInfo;
-		const vec2 RenderPos = GameClient()->m_aClients[ClientId].m_RenderPos;
-		if(!GameClient()->OptimizerAllowRenderPos(RenderPos))
-		{
-			if(m_HistoryValid[ClientId])
-				ClearHistory(ClientId);
+		// bestclient
+		if(!GameClient()->OptimizerAllowRenderPos(GameClient()->m_aClients[ClientId].m_RenderPos))
 			continue;
-		}
+		// bestclient
+
+		CTeeRenderInfo TeeInfo = GameClient()->m_aClients[ClientId].m_RenderInfo;
 
 		const bool PredictPlayer = ShouldPredictPlayer(ClientId);
 		int StartTick;
@@ -106,6 +106,10 @@ void CTrails::OnRender()
 			mix(PrevServerPos, CurServerPos, IntraTick),
 			GameTick,
 		};
+
+		// // NOTE: this is kind of a hack to fix 25tps. This fixes flickering when using the speed mode
+		// m_History[ClientId][(GameTick + 1) % 200] = m_History[ClientId][GameTick % 200];
+		// m_History[ClientId][(GameTick + 2) % 200] = m_History[ClientId][GameTick % 200];
 
 		IGraphics::CLineItem LineItem;
 		bool LineMode = g_Config.m_TcTeeTrailWidth == 0;

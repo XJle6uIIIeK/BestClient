@@ -1,9 +1,12 @@
+/* Copyright © 2026 BestProject Team */
 #include "process_priority.h"
 
 #include <base/log.h>
-#include <base/system.h>
+#include <base/mem.h>
 #include <base/thread.h>
+#include <base/time.h>
 
+#include <engine/graphics.h>
 #include <engine/shared/config.h>
 
 #if defined(CONF_FAMILY_WINDOWS)
@@ -33,6 +36,8 @@ void CProcessPriority::SetDDNetProcessPriority(bool Set)
 		log_info("bestclient", Set ? "Failed to set thread priority" : "Failed to reset thread priority");
 		return;
 	}
+#else
+	(void)Set;
 #endif
 }
 
@@ -46,7 +51,6 @@ void CProcessPriority::DiscordPriorityThread(void *pUserData)
 
 void CProcessPriority::StartDiscordPriorityThread()
 {
-	// Don't start the thread if it's already running
 	if(m_DiscordPriorityThreadRunning.load())
 		return;
 
@@ -102,8 +106,7 @@ void CProcessPriority::SetDiscordProcessesNormalPriority()
 	}
 
 	CloseHandle(hSnapshot);
-	(void)Changed;
-	(void)Failed;
+	log_info("bestclient", "Discord process priority: changed=%d failed=%d", Changed, Failed);
 #endif
 }
 
@@ -112,21 +115,34 @@ void CProcessPriority::OnInit()
 	SetDDNetProcessPriority(g_Config.m_BcHighProcessPriority);
 	if(g_Config.m_BcDiscordNormalProcessPriority)
 		StartDiscordPriorityThread();
+
+	m_LastWindowActive = static_cast<IEngineGraphics *>(Graphics())->WindowActive() != 0;
+	m_HasWindowActive = true;
 }
 
 void CProcessPriority::OnRender()
 {
 	const int64_t DiscordPriorityDelay = m_DiscordPriorityDelay.load();
 	if(g_Config.m_BcDiscordNormalProcessPriority && !m_DiscordPriorityThreadRunning.load() && DiscordPriorityDelay < time_get())
-	{
 		StartDiscordPriorityThread();
+
+	const bool WindowActive = static_cast<IEngineGraphics *>(Graphics())->WindowActive() != 0;
+	if(!m_HasWindowActive || WindowActive != m_LastWindowActive)
+	{
+		m_HasWindowActive = true;
+		m_LastWindowActive = WindowActive;
+		SetDDNetProcessPriority(g_Config.m_BcHighProcessPriority);
 	}
 }
 
-void CProcessPriority::OnFocusChange(bool IsFocused)
+void CProcessPriority::OnShutdown()
 {
-	(void)IsFocused;
-	SetDDNetProcessPriority(g_Config.m_BcHighProcessPriority);
+	if(m_pDiscordPriorityThread)
+	{
+		thread_wait(m_pDiscordPriorityThread);
+		m_pDiscordPriorityThread = nullptr;
+	}
+	m_DiscordPriorityThreadRunning.store(false);
 }
 
 void CProcessPriority::OnConsoleInit()
@@ -141,7 +157,7 @@ void CProcessPriority::ConchainDDNetProcessPriority(IConsole::IResult *pResult, 
 	CProcessPriority *pSelf = (CProcessPriority *)pUserData;
 	if(pResult->NumArguments())
 	{
-		bool Value = pResult->GetInteger(0) != 0;
+		const bool Value = pResult->GetInteger(0) != 0;
 		pSelf->SetDDNetProcessPriority(Value);
 	}
 }

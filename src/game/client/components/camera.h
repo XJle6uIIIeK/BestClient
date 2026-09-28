@@ -48,7 +48,6 @@ private:
 	void ScaleZoom(float Factor);
 	void ChangeZoom(float Target, int Smoothness, bool IsUser);
 	float ZoomProgress(float CurrentTime) const;
-	void RemoveDemoDynamicFov();
 
 	float MinZoomLevel();
 	float MaxZoomLevel();
@@ -60,15 +59,10 @@ private:
 
 	char m_aAutoSpecCameraTooltip[512];
 
-	vec2 m_DemoCameraDriftTargetOffset;
-	vec2 m_DemoCameraDriftCurrentOffset;
-	float m_DemoDynamicFovTarget;
-	float m_DemoDynamicFovCurrent;
-	float m_DemoDynamicFovAppliedFactor;
-	void UpdateDemoCameraEffects(float DeltaTime);
-
-	bool m_CinematicCameraSmoothing;
-	vec2 m_CinematicCameraPosition;
+	// bestclient
+	bool m_CinematicCameraSmoothing = false;
+	vec2 m_CinematicCameraPosition = vec2(0.0f, 0.0f);
+	// bestclient
 
 public:
 	static constexpr float ZOOM_STEP = 0.866025f;
@@ -106,8 +100,6 @@ public:
 	void SetView(ivec2 Pos, bool Relative = false);
 	void GotoSwitch(int Number, int Offset = -1);
 	void GotoTele(int Number, int Offset = -1);
-	void GotoTeleCursor();
-	void GotoFinishCursor();
 
 	void SetZoom(float Target, int Smoothness, bool IsUser);
 	bool ZoomAllowed() const;
@@ -133,9 +125,6 @@ private:
 	static void ConSetViewRelative(IConsole::IResult *pResult, void *pUserData);
 	static void ConGotoSwitch(IConsole::IResult *pResult, void *pUserData);
 	static void ConGotoTele(IConsole::IResult *pResult, void *pUserData);
-	static void ConGotoTeleCursor(IConsole::IResult *pResult, void *pUserData);
-	static void ConGotoFinishCursor(IConsole::IResult *pResult, void *pUserData);
-	static void ConToggleCinematicCamera(IConsole::IResult *pResult, void *pUserData);
 
 	bool m_ForceFreeview;
 	vec2 m_ForceFreeviewPos;

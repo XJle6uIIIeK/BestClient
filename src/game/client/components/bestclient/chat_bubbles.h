@@ -3,9 +3,9 @@
 #define GAME_CLIENT_COMPONENTS_BESTCLIENT_CHAT_BUBBLES_H
 
 #include <base/color.h>
-#include <base/system.h>
-#include <base/vmath.h>
+#include <base/str.h>
 
+#include <engine/shared/protocol.h>
 #include <engine/textrender.h>
 
 #include <game/client/component.h>
@@ -19,7 +19,7 @@ constexpr float BcChatBubbleMarginBetween = 1.0f;
 
 struct CBcChatBubble
 {
-	char m_aText[MAX_LINE_LENGTH] = "";
+	char m_aText[MAX_CHAT_LENGTH] = "";
 	int64_t m_Time = 0;
 	ColorRGBA m_Color = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
 
@@ -47,6 +47,7 @@ class CChatBubbles : public CComponent
 
 	void RenderCurInput(float Y);
 	void RenderChatBubbles(int ClientId);
+	void ExpireBubbles(int ClientId);
 
 	float GetOffset(int ClientId) const;
 	float GetAlpha(int64_t Time) const;
@@ -69,4 +70,4 @@ public:
 	void OnWindowResize() override;
 };
 
-#endif // GAME_CLIENT_COMPONENTS_BESTCLIENT_CHAT_BUBBLES_H
+#endif

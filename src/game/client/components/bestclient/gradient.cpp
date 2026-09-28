@@ -44,7 +44,6 @@ static ColorRGBA SampleColorStops(const std::vector<ColorRGBA> &vColors, float P
 	if(vColors.size() == 1)
 		return vColors[0];
 
-	// Loop seamlessly: last stop blends back into the first (1→2→…→N→1).
 	float Wrapped = std::fmod(Position, 1.0f);
 	if(Wrapped < 0.0f)
 		Wrapped += 1.0f;
@@ -118,13 +117,6 @@ ColorRGBA CBcGradient::SampleRainbow(float Hue)
 	return color_cast<ColorRGBA>(ColorHSLA(std::fmod(Hue, 1.0f), 1.0f, 0.5f));
 }
 
-ColorRGBA CBcGradient::SampleCustomGradient(float Position)
-{
-	std::vector<ColorRGBA> vColors;
-	CollectCustomColors(vColors);
-	return SampleColorStops(vColors, Position);
-}
-
 void CBcGradient::GetSkinToneColors(int ClientId, const CGameClient *pGameClient, ColorRGBA &Body, ColorRGBA &Feet)
 {
 	Body = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
@@ -185,17 +177,6 @@ void CBcGradient::GetAnimatedEndpointColors(int ClientId, const CGameClient *pGa
 	}
 }
 
-std::vector<STextColorSplit> CBcGradient::BuildStaticColorSplits(const char *pText, const ColorRGBA &Color1, const ColorRGBA &Color2)
-{
-	return BuildMultiColorSplits(pText, [&](float t) {
-		return ColorRGBA(
-			Color1.r + t * (Color2.r - Color1.r),
-			Color1.g + t * (Color2.g - Color1.g),
-			Color1.b + t * (Color2.b - Color1.b),
-			1.0f);
-	});
-}
-
 std::vector<STextColorSplit> CBcGradient::BuildAnimatedColorSplits(const char *pText, const ColorRGBA &Color1, const ColorRGBA &Color2, float Phase)
 {
 	return BuildMultiColorSplits(pText, [&](float t) {
@@ -242,13 +223,11 @@ void CBcGradient::ApplyEverythingGradient(CTextCursor *pCursor, const char *pTex
 	char aText[512];
 	if(Length < 0)
 		Length = str_length(pText);
-	Length = minimum(Length, (int)sizeof(aText) - 1);
+	Length = std::min(Length, (int)sizeof(aText) - 1);
 	str_copy(aText, pText, Length + 1);
 
 	const int LocalId = pGameClient->m_Snap.m_LocalClientId;
 	const float Phase = AnimatePhase(pGameClient->Client()->GlobalTime());
-	// Color splits are matched against absolute m_CharCount, so offset by the
-	// characters already written to this cursor (chat builds lines in pieces).
 	const int CharOffset = pCursor->m_CharCount;
 	const std::vector<STextColorSplit> vSplits = BuildAnimatedTextSplits(aText, LocalId, pGameClient, Phase);
 	pCursor->m_vColorSplits.clear();
@@ -283,12 +262,11 @@ void CBcGradient::OnShutdown()
 
 void CBcGradient::RefreshCachedText()
 {
-	// Streamed UI labels (server browser, etc.) bake gradient colors into text
-	// containers; reset them so mode/color changes and animation stay in sync.
 	Ui()->OnElementsReset();
 	GameClient()->m_Chat.RebuildChat();
 	GameClient()->m_NamePlates.ResetNamePlates();
 	GameClient()->m_Hud.ResetHudContainers();
+	GameClient()->m_Scoreboard.ResetTexts();
 	GameClient()->m_InfoMessages.OnWindowResize();
 	GameClient()->m_Broadcast.OnWindowResize();
 }
@@ -308,17 +286,12 @@ void CBcGradient::OnRender()
 	const unsigned CfgColor4 = g_Config.m_BcNameplateGradientColor4;
 
 	bool NeedRefresh = false;
-	if(m_LastEverything < 0)
+	if(m_LastEverything >= 0)
 	{
-		// First frame: just seed tracked values, no rebuild.
-	}
-	else if(Everything != m_LastEverything || Nick != m_LastNick || Clan != m_LastClan || Target != m_LastTarget)
-	{
-		NeedRefresh = true;
-	}
-	else if(Everything && (Mode != m_LastMode || ColorCount != m_LastColorCount || AnimateSpeed != m_LastAnimateSpeed || CfgColor1 != m_LastColor1 || CfgColor2 != m_LastColor2 || CfgColor3 != m_LastColor3 || CfgColor4 != m_LastColor4))
-	{
-		NeedRefresh = true;
+		if(Everything != m_LastEverything || Nick != m_LastNick || Clan != m_LastClan || Target != m_LastTarget)
+			NeedRefresh = true;
+		else if(Everything && (Mode != m_LastMode || ColorCount != m_LastColorCount || AnimateSpeed != m_LastAnimateSpeed || CfgColor1 != m_LastColor1 || CfgColor2 != m_LastColor2 || CfgColor3 != m_LastColor3 || CfgColor4 != m_LastColor4))
+			NeedRefresh = true;
 	}
 
 	m_LastEverything = Everything;

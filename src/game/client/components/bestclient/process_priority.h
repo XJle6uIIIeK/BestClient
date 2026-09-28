@@ -1,3 +1,4 @@
+/* Copyright © 2026 BestProject Team */
 #ifndef GAME_CLIENT_COMPONENTS_BESTCLIENT_PROCESS_PRIORITY_H
 #define GAME_CLIENT_COMPONENTS_BESTCLIENT_PROCESS_PRIORITY_H
 
@@ -18,12 +19,14 @@ class CProcessPriority : public CComponent
 	std::atomic<int64_t> m_DiscordPriorityDelay{0};
 	std::atomic_bool m_DiscordPriorityThreadRunning{false};
 	void *m_pDiscordPriorityThread = nullptr;
+	bool m_HasWindowActive = false;
+	bool m_LastWindowActive = true;
 
 	void SetDiscordProcessesNormalPriority();
 
 	void OnInit() override;
 	void OnRender() override;
-	void OnFocusChange(bool IsFocused) override;
+	void OnShutdown() override;
 	void OnConsoleInit() override;
 
 public:
@@ -31,4 +34,4 @@ public:
 	void StartDiscordPriorityThread();
 };
 
-#endif // GAME_CLIENT_COMPONENTS_BESTCLIENT_PROCESS_PRIORITY_H
+#endif

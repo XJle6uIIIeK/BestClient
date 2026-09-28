@@ -2,12 +2,14 @@
 #ifndef GAME_CLIENT_COMPONENTS_BESTCLIENT_MUSIC_PLAYER_H
 #define GAME_CLIENT_COMPONENTS_BESTCLIENT_MUSIC_PLAYER_H
 
-#include <base/color.h>
-
 #include <game/client/component.h>
 #include <game/client/ui_rect.h>
 
 #include <memory>
+
+class ITextRender;
+
+float MusicPlayerLegacyHudAnchorOffsetCanvasX(ITextRender *pTextRender, int LayoutScale, float HudWidth, float TextScale, bool *pOutReady);
 
 class CMusicPlayer : public CComponent
 {
@@ -33,7 +35,6 @@ public:
 
 	SHudReservation HudReservation() const;
 	vec2 GetHudPushOffsetForRect(const CUIRect &Rect, float CanvasWidth, float CanvasHeight, float Padding = 0.0f) const;
-	bool GetHudThemeColor(ColorRGBA &Out, bool ForcePreview = false) const;
 	CUIRect GetHudEditorRect(bool ForcePreview = false) const;
 	void RenderHudEditor(bool ForcePreview);
 

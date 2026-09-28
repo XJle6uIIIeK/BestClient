@@ -10,7 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
-class CHttpRequest;
+class IHttpRequest;
 
 class CShowPoints : public CComponent
 {
@@ -59,7 +59,7 @@ private:
 	{
 		std::string m_Name;
 		EProvider m_Provider = EProvider::None;
-		std::shared_ptr<CHttpRequest> m_pTask;
+		std::shared_ptr<IHttpRequest> m_pTask;
 	};
 
 	std::unordered_map<std::string, SCacheEntry> m_aCache[PROVIDER_COUNT];

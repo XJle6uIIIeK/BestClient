@@ -150,9 +150,9 @@ public:
 
 	ETextCursorCursorMode m_CursorMode = TEXT_CURSOR_CURSOR_MODE_NONE;
 	bool m_ForceCursorRendering = false;
-	// skip drawing the blinking cursor quad while still calculating m_CursorRenderedPosition,
-	// used by callers that render their own animated cursor instead
+	// bestclient
 	bool m_HideCursorQuad = false;
+	// bestclient
 	// note this is the decoded character offset
 	int m_CursorCharacter = -1;
 	vec2 m_CursorRenderedPosition = vec2(-1.0f, -1.0f);

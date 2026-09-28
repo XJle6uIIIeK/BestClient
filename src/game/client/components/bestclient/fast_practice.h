@@ -48,6 +48,7 @@ public:
 	bool ForcePredictPlayers() const;
 	void InvalidateBufferedInputState();
 	bool IsPracticeParticipant(int ClientId) const;
+	bool ShouldShowPracticeFrozenSkin(int ClientId) const;
 	int ControlledPracticeId() const;
 	int PartnerPracticeId() const;
 	int CurrentPracticeDummyId() const;
@@ -137,6 +138,9 @@ private:
 	int m_LastResolvedLocalClientId = -1;
 	int m_LastResolvedDummyClientId = -1;
 	std::array<ivec2, NUM_DUMMIES> m_aServerLockedTargets{};
+	std::array<int, NUM_DUMMIES> m_aServerLockedFire{};
+	std::array<int, NUM_DUMMIES> m_aServerLockedNextWeapon{};
+	std::array<int, NUM_DUMMIES> m_aServerLockedPrevWeapon{};
 	std::array<bool, NUM_DUMMIES> m_aHasServerLockedTargets{};
 	std::array<ivec2, MAX_CLIENTS> m_aFrozenTarget{};
 	std::array<bool, MAX_CLIENTS> m_aFrozenTargetValid{};
@@ -150,9 +154,6 @@ private:
 	CNetObj_Character m_aFastRenderCur[MAX_CLIENTS]{};
 	std::array<bool, MAX_CLIENTS> m_aFastRenderValid{};
 	std::array<int, MAX_CLIENTS> m_aLastEventTick{};
-	// Cached practice-world cores. The regular prediction in CGameClient::OnPredict overwrites
-	// m_aClients[].m_Predicted on every repredict, so the practice state has to be re-published
-	// every frame, not only on frames where the practice world actually advanced a tick.
 	std::array<CCharacterCore, MAX_CLIENTS> m_aPublishedPredicted{};
 	std::array<CCharacterCore, MAX_CLIENTS> m_aPublishedPrevPredicted{};
 	std::array<CCharacterCore, MAX_CLIENTS> m_aPublishedRegularPredicted{};
@@ -163,11 +164,15 @@ private:
 	SAnchorData m_MainAnchor;
 	SAnchorData m_DummyAnchor;
 	std::array<int, MAX_CLIENTS> m_aLastAttackTick{};
+	std::array<int, MAX_CLIENTS> m_aFreezeSkinTicks{};
+	int m_LastFreezeSkinDebounceTick = -1;
 	std::array<SPracticeCommandState, MAX_CLIENTS> m_aPracticeCommandState{};
 	std::array<SPracticeRaceState, MAX_CLIENTS> m_aPracticeRaceState{};
 
 	CGameWorld m_PracticeWorld;
 	CGameWorld m_PracticePrevWorld;
+
+	static constexpr int FREEZE_SKIN_DEBOUNCE_TICKS = 3;
 
 	static void ConFastPracticeToggle(IConsole::IResult *pResult, void *pUserData);
 
@@ -188,6 +193,7 @@ private:
 	void TrackFireSound(int ClientId, CCharacter *pChar);
 	static int WeaponFireSound(int Weapon);
 	void MaybePlayHammerHitEffect(CCharacter *pChar);
+	void UpdateFreezeSkinDebounce();
 	void RenderGhost(const SGhostData &Ghost, float Alpha) const;
 	void ReleaseBufferedInputState();
 	void CaptureServerLockedTargets();

@@ -1,7 +1,8 @@
+/* Copyright © 2026 BestProject Team */
 #include "spec_pause_radio.h"
 
 #include <base/color.h>
-#include <base/system.h>
+#include <base/str.h>
 #include <base/time.h>
 #include <base/vmath.h>
 
@@ -55,7 +56,7 @@ static bool ReplaceBindToken(char *pBuf, size_t BufSize, const char *pFrom, cons
 
 		char aPrefix[512];
 		const int PrefixLen = (int)(pMatch - pCursor);
-		str_copy(aPrefix, pCursor, minimum((int)sizeof(aPrefix), PrefixLen + 1));
+		str_copy(aPrefix, pCursor, std::min((int)sizeof(aPrefix), PrefixLen + 1));
 		str_append(aResult, aPrefix, sizeof(aResult));
 		str_append(aResult, pTo, sizeof(aResult));
 		pCursor = pMatch + FromLen;
@@ -71,6 +72,12 @@ static bool ReplaceBindToken(char *pBuf, size_t BufSize, const char *pFrom, cons
 CSpecPauseRadio::CSpecPauseRadio()
 {
 	OnReset();
+}
+
+void CSpecPauseRadio::OnInit()
+{
+	if(g_Config.m_BcBetterSpectate)
+		SyncSpectateBinds(true);
 }
 
 void CSpecPauseRadio::SendSpecPause(int Type)
@@ -131,7 +138,6 @@ bool CSpecPauseRadio::OnInput(const IInput::CEvent &Event)
 
 void CSpecPauseRadio::SyncSpectateBinds(bool EnableBetterSpectate)
 {
-	// Default Q bind is "say /pause" (see CBinds::SetDefaults).
 	const char *pFrom = EnableBetterSpectate ? "say /pause" : "+specpause";
 	const char *pTo = EnableBetterSpectate ? "+specpause" : "say /pause";
 

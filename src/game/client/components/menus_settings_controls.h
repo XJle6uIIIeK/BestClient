@@ -18,9 +18,9 @@ enum class EBindOptionGroup
 	VOTING,
 	CHAT,
 	DUMMY,
-	BEST_CLIENT,
-	BEST_CLIENT_PRACTICE,
 	MISCELLANEOUS,
+	BEST_CLIENT, // bestclient
+	BEST_CLIENT_PRACTICE, // bestclient
 	CUSTOM,
 	NUM,
 };

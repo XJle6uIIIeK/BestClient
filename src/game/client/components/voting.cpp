@@ -2,20 +2,21 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "voting.h"
 
-#include <base/system.h>
+#include <base/str.h>
+#include <base/time.h>
 
 #include <engine/shared/config.h>
 #include <engine/textrender.h>
 
 #include <generated/protocol.h>
 
-#include <game/client/components/hud_layout.h>
+#include <game/client/components/bestclient/bestclient.h> // bestclient
+#include <game/client/components/hud_layout.h> // bestclient
 #include <game/client/components/scoreboard.h>
 #include <game/client/components/sounds.h>
 #include <game/client/gameclient.h>
+#include <game/client/ui.h> // bestclient
 #include <game/localization.h>
-
-#include <algorithm>
 
 void CVoting::ConCallvote(IConsole::IResult *pResult, void *pUserData)
 {
@@ -157,7 +158,7 @@ int CVoting::SecondsLeft() const
 CVoting::CVoting()
 {
 	ClearOptions();
-	OnReset();
+	CVoting::OnReset();
 }
 
 void CVoting::AddOption(const char *pDescription)
@@ -214,7 +215,7 @@ void CVoting::RemoveOption(const char *pDescription)
 				pOption->m_pPrev->m_pNext = pOption;
 			m_pRecycleLast = pOption;
 			if(!m_pRecycleFirst)
-				m_pRecycleLast = pOption;
+				m_pRecycleFirst = pOption;
 
 			break;
 		}
@@ -337,32 +338,9 @@ void CVoting::OnMessage(int MsgType, void *pRawMsg)
 	}
 }
 
-CUIRect CVoting::GetHudRect(float HudWidth, float HudHeight, bool ForcePreview) const
-{
-	if(!ForcePreview && !HudLayout::IsEnabled(HudLayout::MODULE_VOTES))
-		return {0.0f, 0.0f, 0.0f, 0.0f};
-	if(g_Config.m_TcMiniVoteHud > 0)
-		return {0.0f, 0.0f, 0.0f, 0.0f};
-	if(!ForcePreview && !IsVoting())
-		return {0.0f, 0.0f, 0.0f, 0.0f};
-
-	const auto Layout = HudLayout::Get(HudLayout::MODULE_VOTES, HudWidth, HudHeight);
-	const bool HasOverride = HudLayout::HasRuntimeOverride(HudLayout::MODULE_VOTES);
-	const float Scale = std::clamp(Layout.m_Scale / 100.0f, 0.25f, 3.0f);
-	CUIRect Rect = {HasOverride ? Layout.m_X : 0.0f, HasOverride ? Layout.m_Y : 60.0f, 120.0f * Scale, 38.0f * Scale};
-	Rect.x = std::clamp(Rect.x, 0.0f, std::max(0.0f, HudWidth - Rect.w));
-	Rect.y = std::clamp(Rect.y, 0.0f, std::max(0.0f, HudHeight - Rect.h));
-	if(!ForcePreview)
-	{
-		const vec2 Offset = GameClient()->m_MusicPlayer.GetHudPushOffsetForRect(Rect, HudWidth, HudHeight, 2.0f);
-		Rect.x += Offset.x;
-		Rect.y += Offset.y;
-	}
-	return Rect;
-}
-
 void CVoting::Render(bool ForcePreview)
 {
+	// bestclient
 	if(!ForcePreview && !HudLayout::IsEnabled(HudLayout::MODULE_VOTES))
 		return;
 	if(!ForcePreview && ((!g_Config.m_ClShowVotesAfterVoting && !GameClient()->m_Scoreboard.IsActive() && TakenChoice()) || !IsVoting()))
@@ -374,11 +352,9 @@ void CVoting::Render(bool ForcePreview)
 		return;
 	}
 
-	// TClient
 	if(g_Config.m_TcMiniVoteHud > 0)
 	{
-		if(!ForcePreview)
-			GameClient()->m_TClient.RenderMiniVoteHud();
+		GameClient()->m_TClient.RenderMiniVoteHud(ForcePreview);
 		return;
 	}
 
@@ -389,8 +365,9 @@ void CVoting::Render(bool ForcePreview)
 		return;
 	const auto Layout = HudLayout::Get(HudLayout::MODULE_VOTES, HudWidth, HudHeight);
 	const float Scale = std::clamp(Layout.m_Scale / 100.0f, 0.25f, 3.0f);
+	const float ModuleAlpha = HudLayout::AlphaFactor(HudLayout::MODULE_VOTES);
 	const int Corners = HudLayout::BackgroundCorners(IGraphics::CORNER_ALL, View.x, View.y, View.w, View.h, HudWidth, HudHeight);
-	View.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.4f), Corners, 3.0f * Scale);
+	View.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.4f * ModuleAlpha), Corners, 3.0f * Scale);
 	View.Margin(3.0f * Scale, &View);
 
 	SLabelProperties Props;
@@ -441,7 +418,32 @@ void CVoting::Render(bool ForcePreview)
 	Ui()->DoLabel(&RightColumn, aBuf, 6.0f * Scale, TEXTALIGN_MR);
 
 	TextRender()->TextColor(TextRender()->DefaultTextColor());
+	// bestclient
 }
+
+// bestclient
+CUIRect CVoting::GetHudRect(float HudWidth, float HudHeight, bool ForcePreview) const
+{
+	if(!ForcePreview && !HudLayout::IsEnabled(HudLayout::MODULE_VOTES))
+		return {0.0f, 0.0f, 0.0f, 0.0f};
+	if(!ForcePreview && !IsVoting())
+		return {0.0f, 0.0f, 0.0f, 0.0f};
+
+	const auto Layout = HudLayout::Get(HudLayout::MODULE_VOTES, HudWidth, HudHeight);
+	const float Scale = std::clamp(Layout.m_Scale / 100.0f, 0.25f, 3.0f);
+	const bool Mini = g_Config.m_TcMiniVoteHud > 0;
+	CUIRect Rect = {Layout.m_X, Layout.m_Y, (Mini ? 70.0f : 120.0f) * Scale, (Mini ? 35.0f : 38.0f) * Scale};
+	Rect.x = std::clamp(Rect.x, 0.0f, std::max(0.0f, HudWidth - Rect.w));
+	Rect.y = std::clamp(Rect.y, 0.0f, std::max(0.0f, HudHeight - Rect.h));
+	if(!ForcePreview)
+	{
+		const vec2 Offset = GameClient()->m_MusicPlayer.GetHudPushOffsetForRect(Rect, HudWidth, HudHeight, 2.0f);
+		Rect.x += Offset.x;
+		Rect.y += Offset.y;
+	}
+	return Rect;
+}
+// bestclient
 
 void CVoting::RenderBars(CUIRect Bars) const
 {
@@ -467,4 +469,8 @@ void CVoting::RenderBars(CUIRect Bars) const
 			NoArea.Draw(ColorRGBA(0.9f, 0.2f, 0.2f, 0.85f), IGraphics::CORNER_ALL, NoArea.h / 2.0f);
 		}
 	}
+
+	// bestclient
+	BestClientRenderVotePercentages(Ui(), TextRender(), Bars, m_Yes, m_No, m_Total);
+	// bestclient
 }

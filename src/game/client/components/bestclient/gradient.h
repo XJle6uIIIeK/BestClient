@@ -54,10 +54,8 @@ public:
 	static bool AppliesTo(int ClientId, const CGameClient *pGameClient);
 	static float AnimatePhase(double GlobalTime);
 	static ColorRGBA SampleRainbow(float Hue);
-	static ColorRGBA SampleCustomGradient(float Position);
 	static void GetSkinToneColors(int ClientId, const CGameClient *pGameClient, ColorRGBA &Body, ColorRGBA &Feet);
 	static void GetAnimatedEndpointColors(int ClientId, const CGameClient *pGameClient, float Phase, ColorRGBA &Color1, ColorRGBA &Color2);
-	static std::vector<STextColorSplit> BuildStaticColorSplits(const char *pText, const ColorRGBA &Color1, const ColorRGBA &Color2);
 	static std::vector<STextColorSplit> BuildAnimatedColorSplits(const char *pText, const ColorRGBA &Color1, const ColorRGBA &Color2, float Phase);
 	static std::vector<STextColorSplit> BuildAnimatedTextSplits(const char *pText, int ClientId, CGameClient *pGameClient, float Phase);
 	static void ApplyEverythingGradient(CTextCursor *pCursor, const char *pText, int Length, CGameClient *pGameClient);

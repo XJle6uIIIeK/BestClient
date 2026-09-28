@@ -13,6 +13,7 @@ class CCollision;
 class CCharacter;
 class CEntity;
 class CMapBugs;
+class CEgoTilesPrediction; // bestclient
 
 class CGameWorld
 {
@@ -51,6 +52,7 @@ public:
 
 	// DDRace
 	void ReleaseHooked(int ClientId);
+	std::vector<CCharacter *> IntersectedCharacters(vec2 Pos0, vec2 Pos1, float Radius, const CEntity *pNotThis = nullptr);
 
 	int m_GameTick;
 
@@ -63,7 +65,9 @@ public:
 	std::vector<SSwitchers> &Switchers() { return m_Core.m_vSwitchers; }
 	CEntity *GetEntity(int Id, int EntityType);
 	CCharacter *GetCharacterById(int Id) { return (Id >= 0 && Id < MAX_CLIENTS) ? m_apCharacters[Id] : nullptr; }
+	// bestclient
 	const CCharacter *GetCharacterById(int Id) const { return (Id >= 0 && Id < MAX_CLIENTS) ? m_apCharacters[Id] : nullptr; }
+	// bestclient
 
 	// from gamecontext
 	void CreateExplosion(vec2 Pos, int Owner, int Weapon, bool NoDamage, int ActivatedTeam, CClientMask Mask, int Id = -1);
@@ -76,7 +80,6 @@ public:
 		bool m_IsFNG;
 		bool m_InfiniteAmmo;
 		bool m_PredictTiles;
-		bool m_PredictTeleports; // BestClient: only enabled inside the fast practice world
 		int m_PredictFreeze;
 		bool m_PredictWeapons;
 		bool m_PredictDDRace;
@@ -85,6 +88,8 @@ public:
 		bool m_BugDDRaceInput;
 		bool m_NoWeakHookAndBounce;
 		bool m_PredictEvents;
+		bool m_OldLaser;
+		bool m_PredictTeleports; // bestclient
 	} m_WorldConfig;
 
 	bool m_IsValidCopy;
@@ -93,11 +98,16 @@ public:
 
 	int m_LocalClientId;
 
+	// bestclient
+	CEgoTilesPrediction *m_pEgoTilesPrediction = nullptr;
+	// bestclient
+
 	bool IsLocalTeam(int OwnerId) const;
 	void OnModified() const;
 	void NetObjBegin(CTeamsCore Teams, int LocalClientId);
 	void NetCharAdd(int ObjId, CNetObj_Character *pChar, CNetObj_DDNetCharacter *pExtended, int GameTeam, bool IsLocal);
 	void NetObjAdd(int ObjId, int ObjType, const void *pObjData, const CNetObj_EntityEx *pDataEx);
+	void ResetDoorCollision();
 	void NetObjEnd();
 	void CopyWorld(CGameWorld *pFrom);
 	void CopyWorldClean(CGameWorld *pFrom); // TClient
@@ -134,6 +144,7 @@ public:
 
 	void CreatePredictedEvent(const CPredictedEvent &NewEvent);
 	bool CheckPredictedEventHandled(const CPredictedEvent &CheckEvent);
+	void PlayPredictedEvents(int Tick);
 
 	void CreatePredictedSound(vec2 Pos, int SoundId, int Id = -1);
 	void CreatePredictedExplosionEvent(vec2 Pos, int Id = -1);

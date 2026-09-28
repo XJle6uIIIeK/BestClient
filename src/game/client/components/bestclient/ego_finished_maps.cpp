@@ -1,12 +1,13 @@
 /* Copyright © 2026 BestProject Team */
 #include "ego_finished_maps.h"
 
-#include <base/system.h>
+#include <base/str.h>
+#include <base/time.h>
 
 #include <engine/client.h>
+#include <engine/http.h>
 #include <engine/serverbrowser.h>
 #include <engine/shared/config.h>
-#include <engine/shared/http.h>
 #include <engine/shared/json.h>
 
 namespace

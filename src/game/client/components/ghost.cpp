@@ -3,11 +3,12 @@
 #include "ghost.h"
 
 #include <base/log.h>
-#include <base/math.h>
+#include <base/mem.h>
 #include <base/process.h>
 #include <base/time.h>
 
 #include <engine/ghost.h>
+#include <engine/graphics.h>
 #include <engine/shared/config.h>
 #include <engine/storage.h>
 
@@ -16,8 +17,6 @@
 #include <game/client/components/skins.h>
 #include <game/client/gameclient.h>
 #include <game/client/race.h>
-
-#include <limits>
 
 const char *CGhost::ms_pGhostDir = "ghosts";
 
@@ -125,76 +124,6 @@ CGhostCharacter *CGhost::CGhostPath::Get(int Index)
 	int Chunk = Index / m_ChunkSize;
 	int Pos = Index % m_ChunkSize;
 	return &m_vpChunks[Chunk][Pos];
-}
-
-const CGhostCharacter *CGhost::CGhostPath::Get(int Index) const
-{
-	if(Index < 0 || Index >= m_NumItems)
-		return nullptr;
-
-	int Chunk = Index / m_ChunkSize;
-	int Pos = Index % m_ChunkSize;
-	return &m_vpChunks[Chunk][Pos];
-}
-
-bool CGhost::TryGetOwnGhostTimeAtX(float WorldX, float *pTimeSeconds)
-{
-	if(!pTimeSeconds)
-		return false;
-
-	const CMenus::CGhostItem *pOwnGhost = GameClient()->m_Menus.GetOwnGhost();
-	if(!pOwnGhost || !pOwnGhost->Active() || pOwnGhost->m_Slot < 0 || pOwnGhost->m_Slot >= MAX_ACTIVE_GHOSTS)
-		return false;
-
-	const CGhostItem &Ghost = m_aActiveGhosts[pOwnGhost->m_Slot];
-	if(Ghost.Empty() || Ghost.m_StartTick < 0 || Ghost.m_Path.Size() < 2)
-		return false;
-
-	const int TickSpeed = maximum(1, Client()->GameTickSpeed());
-	int BestIndex = -1;
-	float BestDist = std::numeric_limits<float>::max();
-
-	for(int i = 0; i < Ghost.m_Path.Size(); ++i)
-	{
-		const CGhostCharacter *pChar = Ghost.m_Path.Get(i);
-		if(!pChar)
-			continue;
-
-		const float Dist = absolute((float)pChar->m_X - WorldX);
-		if(Dist < BestDist)
-		{
-			BestDist = Dist;
-			BestIndex = i;
-		}
-
-		// Prefer the first time the ghost actually crosses this X column.
-		if(i > 0)
-		{
-			const CGhostCharacter *pPrev = Ghost.m_Path.Get(i - 1);
-			if(!pPrev)
-				continue;
-			const float PrevX = (float)pPrev->m_X;
-			const float CurX = (float)pChar->m_X;
-			if((PrevX <= WorldX && CurX >= WorldX) || (PrevX >= WorldX && CurX <= WorldX))
-			{
-				const float Span = CurX - PrevX;
-				const float Alpha = absolute(Span) > 0.001f ? std::clamp((WorldX - PrevX) / Span, 0.0f, 1.0f) : 0.0f;
-				const float Tick = mix((float)pPrev->m_Tick, (float)pChar->m_Tick, Alpha);
-				*pTimeSeconds = maximum(0.0f, (Tick - Ghost.m_StartTick) / (float)TickSpeed);
-				return true;
-			}
-		}
-	}
-
-	if(BestIndex < 0 || BestDist > 32.0f * 4.0f)
-		return false;
-
-	const CGhostCharacter *pBest = Ghost.m_Path.Get(BestIndex);
-	if(!pBest)
-		return false;
-
-	*pTimeSeconds = maximum(0.0f, (pBest->m_Tick - Ghost.m_StartTick) / (float)TickSpeed);
-	return true;
 }
 
 void CGhost::GetPath(char *pBuf, int Size, const char *pPlayerName, int Time) const
@@ -388,6 +317,11 @@ void CGhost::OnRender()
 
 	int PlaybackTick = Client()->PredGameTick(g_Config.m_ClDummy) - m_StartRenderTick;
 
+	CScreenRect ScreenRect = Graphics()->GetScreen();
+
+	// 200x200 box around the player
+	ScreenRect.Expand(100.0f);
+
 	for(auto &Ghost : m_aActiveGhosts)
 	{
 		if(Ghost.Empty())
@@ -406,7 +340,7 @@ void CGhost::OnRender()
 			continue;
 
 		int CurPos = Ghost.m_PlaybackPos;
-		int PrevPos = maximum(0, CurPos - 1);
+		int PrevPos = std::max(0, CurPos - 1);
 		if(Ghost.m_Path.Get(PrevPos)->m_Tick > GhostTick)
 			continue;
 
@@ -437,8 +371,8 @@ void CGhost::OnRender()
 			pRenderInfo = &GhostNinjaRenderInfo;
 		}
 
-		GameClient()->m_Players.RenderHook(&Prev, &Player, pRenderInfo, -2, IntraTick);
-		GameClient()->m_Players.RenderPlayer(&Prev, &Player, pRenderInfo, -2, IntraTick);
+		GameClient()->m_Players.RenderHook(ScreenRect, &Prev, &Player, pRenderInfo, -2, IntraTick);
+		GameClient()->m_Players.RenderPlayer(ScreenRect, &Prev, &Player, pRenderInfo, -2, IntraTick);
 	}
 }
 
@@ -546,52 +480,88 @@ int CGhost::Load(const char *pFilename)
 
 	int Index = 0;
 	bool FoundSkin = false;
-	bool NoTick = false;
+	bool FoundCharacterNoTick = false;
+	bool FoundCharacterTick = false;
 	bool Error = false;
 
 	int Type;
-	while(!Error && GhostLoader()->ReadNextType(&Type))
+	while(GhostLoader()->ReadNextType(&Type))
 	{
 		if(Index == pInfo->m_NumTicks && (Type == GHOSTDATA_TYPE_CHARACTER || Type == GHOSTDATA_TYPE_CHARACTER_NO_TICK))
 		{
+			log_error_color(LOG_COLOR_GHOST, "ghost", "Failed to read ghost data: too many ghost characters");
 			Error = true;
 			break;
 		}
 
 		if(Type == GHOSTDATA_TYPE_SKIN && !FoundSkin)
 		{
-			FoundSkin = true;
 			if(!GhostLoader()->ReadData(Type, &pGhost->m_Skin, sizeof(CGhostSkin)))
+			{
+				log_error_color(LOG_COLOR_GHOST, "ghost", "Failed to read ghost data: failed to read skin");
 				Error = true;
+				break;
+			}
+			FoundSkin = true;
 		}
 		else if(Type == GHOSTDATA_TYPE_CHARACTER_NO_TICK)
 		{
-			NoTick = true;
-			if(!GhostLoader()->ReadData(Type, pGhost->m_Path.Get(Index++), sizeof(CGhostCharacter_NoTick)))
+			if(FoundCharacterTick)
+			{
+				log_error_color(LOG_COLOR_GHOST, "ghost", "Failed to read ghost data: ghost character with and without tick cannot be mixed");
 				Error = true;
+				break;
+			}
+			else if(!GhostLoader()->ReadData(Type, pGhost->m_Path.Get(Index++), sizeof(CGhostCharacter_NoTick)))
+			{
+				log_error_color(LOG_COLOR_GHOST, "ghost", "Failed to read ghost data: failed to read ghost character (without tick)");
+				Error = true;
+				break;
+			}
+			FoundCharacterNoTick = true;
 		}
 		else if(Type == GHOSTDATA_TYPE_CHARACTER)
 		{
-			if(!GhostLoader()->ReadData(Type, pGhost->m_Path.Get(Index++), sizeof(CGhostCharacter)))
+			if(FoundCharacterNoTick)
+			{
+				log_error_color(LOG_COLOR_GHOST, "ghost", "Failed to read ghost data: ghost character with and without tick cannot be mixed");
 				Error = true;
+				break;
+			}
+			else if(!GhostLoader()->ReadData(Type, pGhost->m_Path.Get(Index++), sizeof(CGhostCharacter)))
+			{
+				log_error_color(LOG_COLOR_GHOST, "ghost", "Failed to read ghost data: failed to read ghost character (with tick)");
+				Error = true;
+				break;
+			}
+			FoundCharacterTick = true;
 		}
 		else if(Type == GHOSTDATA_TYPE_START_TICK)
 		{
 			if(!GhostLoader()->ReadData(Type, &pGhost->m_StartTick, sizeof(int)))
+			{
+				log_error_color(LOG_COLOR_GHOST, "ghost", "Failed to read ghost data: failed to read start tick");
 				Error = true;
+				break;
+			}
 		}
 	}
 
 	GhostLoader()->Close();
 
-	if(Error || Index != pInfo->m_NumTicks)
+	if(!Error && Index != pInfo->m_NumTicks)
 	{
-		log_error_color(LOG_COLOR_GHOST, "ghost", "Failed to read all ghost data (error='%d', got '%d' ticks, wanted '%d' ticks)", Error, Index, pInfo->m_NumTicks);
+		log_error_color(LOG_COLOR_GHOST, "ghost", "Failed to read all ghost data (got '%d' ticks, wanted '%d' ticks)", Index, pInfo->m_NumTicks);
+		Error = true;
+	}
+
+	if(Error)
+	{
 		pGhost->Reset();
 		return -1;
 	}
 
-	if(NoTick)
+	if(FoundCharacterNoTick)
 	{
 		int StartTick = 0;
 		for(int i = 1; i < pInfo->m_NumTicks; i++) // estimate start tick

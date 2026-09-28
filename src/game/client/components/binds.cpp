@@ -2,27 +2,20 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "binds.h"
 
+#include <base/dbg.h>
 #include <base/log.h>
-#include <base/system.h>
+#include <base/mem.h>
+#include <base/str.h>
 
 #include <engine/config.h>
 #include <engine/console.h>
 #include <engine/shared/config.h>
 
+#include <game/client/components/chat.h>
+#include <game/client/components/console.h>
 #include <game/client/gameclient.h>
 
 static constexpr LOG_COLOR BIND_PRINT_COLOR{255, 255, 204};
-
-static void ApplyGoresModeSuffix(CGameClient *pGameClient, char *pBind, int Size)
-{
-	if(g_Config.m_BcGoresMode &&
-		!pGameClient->m_Controls.m_WeaponsGot &&
-		str_find(pBind, "+fire") &&
-		!str_find(pBind, "+prevweapon"))
-	{
-		str_append(pBind, ";+prevweapon", Size);
-	}
-}
 
 bool CBinds::CBindsSpecial::OnInput(const IInput::CEvent &Event)
 {
@@ -140,17 +133,15 @@ bool CBinds::OnInput(const IInput::CEvent &Event)
 		if(ActiveBind == m_vActiveBinds.end())
 		{
 			const auto &&OnKeyPress = [&](int Mask) {
-				char aBind[512];
-				str_copy(aBind, m_aapKeyBindings[Mask][Event.m_Key], sizeof(aBind));
+				const char *pBind = m_aapKeyBindings[Mask][Event.m_Key];
 				if(g_Config.m_ClSubTickAiming)
 				{
-					if(str_comp("+fire", aBind) == 0 || str_comp("+hook", aBind) == 0)
+					if(str_comp("+fire", pBind) == 0 || str_comp("+hook", pBind) == 0)
 					{
 						m_MouseOnAction = true;
 					}
 				}
-				ApplyGoresModeSuffix(GameClient(), aBind, sizeof(aBind));
-				Console()->ExecuteLineStroked(1, aBind, IConsole::CLIENT_ID_UNSPECIFIED);
+				Console()->ExecuteLineStroked(1, pBind, IConsole::CLIENT_ID_UNSPECIFIED);
 				m_vActiveBinds.emplace_back(Event.m_Key, Mask);
 			};
 
@@ -173,10 +164,7 @@ bool CBinds::OnInput(const IInput::CEvent &Event)
 			// Have to check for nullptr again because the previous execute can unbind itself
 			if(m_aapKeyBindings[ActiveBind->m_ModifierMask][ActiveBind->m_Key])
 			{
-				char aBind[512];
-				str_copy(aBind, m_aapKeyBindings[ActiveBind->m_ModifierMask][ActiveBind->m_Key], sizeof(aBind));
-				ApplyGoresModeSuffix(GameClient(), aBind, sizeof(aBind));
-				Console()->ExecuteLineStroked(1, aBind, IConsole::CLIENT_ID_UNSPECIFIED);
+				Console()->ExecuteLineStroked(1, m_aapKeyBindings[ActiveBind->m_ModifierMask][ActiveBind->m_Key], IConsole::CLIENT_ID_UNSPECIFIED);
 			}
 			Handled = true;
 		}
@@ -198,10 +186,7 @@ bool CBinds::OnInput(const IInput::CEvent &Event)
 			{
 				return;
 			}
-			char aBind[512];
-			str_copy(aBind, m_aapKeyBindings[Bind.m_ModifierMask][Bind.m_Key], sizeof(aBind));
-			ApplyGoresModeSuffix(GameClient(), aBind, sizeof(aBind));
-			Console()->ExecuteLineStroked(0, aBind, IConsole::CLIENT_ID_UNSPECIFIED);
+			Console()->ExecuteLineStroked(0, m_aapKeyBindings[Bind.m_ModifierMask][Bind.m_Key], IConsole::CLIENT_ID_UNSPECIFIED);
 		};
 
 		// Release active bind that uses this primary key
@@ -320,9 +305,8 @@ void CBinds::SetDefaults()
 	Bind(KEY_F4, "vote no");
 
 	Bind(KEY_K, "kill");
-	Bind(KEY_J, "toggle_admin_panel");
-	Bind(KEY_Q, "say /pause");
-	Bind(KEY_P, "say /spec");
+	Bind(KEY_Q, "say /spec");
+	Bind(KEY_P, "say /pause");
 
 	g_Config.m_ClDDRaceBindsSet = 0;
 	SetDDRaceBinds(false);
@@ -375,7 +359,9 @@ void CBinds::ConBinds(IConsole::IResult *pResult, void *pUserData)
 		else
 		{
 			if(!pBinds->m_aapKeyBindings[BindSlot.m_ModifierMask][BindSlot.m_Key])
+			{
 				log_info_color(BIND_PRINT_COLOR, "binds", "%s is not bound", pKeyName);
+			}
 			else
 			{
 				char *pBuf = pBinds->GetKeyBindCommand(BindSlot.m_ModifierMask, BindSlot.m_Key);
@@ -441,11 +427,21 @@ CBindSlot CBinds::GetBindSlot(const char *pBindString) const
 			return EMPTY_BIND_SLOT;
 
 		if(str_find(pKey + 1, "+"))
+		{
 			pKey = str_next_token(pKey + 1, "+", aMod, sizeof(aMod));
+			if(pKey == nullptr)
+				return EMPTY_BIND_SLOT;
+		}
 		else
 			break;
 	}
-	return {Input()->FindKeyByName(ModifierMask == KeyModifier::NONE ? aMod : pKey + 1), ModifierMask};
+	int Key = Input()->FindKeyByName(ModifierMask == KeyModifier::NONE ? aMod : pKey + 1);
+	if(Key == KEY_ESCAPE)
+	{
+		// Binding to Escape key is not supported
+		Key = KEY_UNKNOWN;
+	}
+	return {Key, ModifierMask};
 }
 
 const char *CBinds::GetModifierName(int Modifier)
@@ -551,5 +547,10 @@ void CBinds::SetDDRaceBinds(bool FreeOnly)
 		Bind(KEY_LALT, "toggle_scoreboard_cursor", FreeOnly);
 	}
 
-	g_Config.m_ClDDRaceBindsSet = 2;
+	if(g_Config.m_ClDDRaceBindsSet < 3)
+	{
+		Bind(KEY_W, "+jump", FreeOnly);
+	}
+
+	g_Config.m_ClDDRaceBindsSet = 3;
 }

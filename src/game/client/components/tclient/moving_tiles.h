@@ -12,7 +12,6 @@
 class CQuad;
 class CMapItemGroup;
 class CMapItemLayerQuads;
-class CCharacter;
 
 enum class EMovingTileRenderType
 {
@@ -33,16 +32,15 @@ enum class EQType
 	NUM
 };
 
-static constexpr char ValidQuadNames[][30] = 
-{
-	"QFr",
-	"QUnFr",
-	"QDeath",
-	"QStopa",
-	"QCfrm",
-	"QHook",
-	"QUnHook"
-};
+static constexpr char ValidQuadNames[][30] =
+	{
+		"QFr",
+		"QUnFr",
+		"QDeath",
+		"QStopa",
+		"QCfrm",
+		"QHook",
+		"QUnHook"};
 
 class CQuadData : CMapItemLayerQuads
 {
@@ -72,7 +70,6 @@ public:
 	void OnStateChange(int NewState, int OldState) override;
 	void OnMapLoad() override;
 	void OnRender() override;
-	void ApplyEgoTilesAntiLag(CCharacter *pCharacter) const;
 
 	int Sizeof() const override { return sizeof(*this); }
 };

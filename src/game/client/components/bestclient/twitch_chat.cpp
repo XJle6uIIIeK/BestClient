@@ -1,18 +1,22 @@
 /* Copyright © 2026 BestProject Team */
 #include "twitch_chat.h"
 
+#include <base/mem.h>
 #include <base/net.h>
-#include <base/system.h>
+#include <base/secure.h>
+#include <base/str.h>
+#include <base/time.h>
 
 #include <engine/shared/config.h>
+#include <engine/shared/protocol.h>
 
 #include <game/client/components/chat.h>
 #include <game/client/gameclient.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cinttypes>
 #include <chrono>
-#include <cstring>
 
 namespace
 {
@@ -117,7 +121,7 @@ void CTwitchChat::FlushChatMessages()
 
 	for(const SQueuedMessage &Message : Messages)
 	{
-		char aLine[MAX_LINE_LENGTH];
+		char aLine[MAX_CHAT_LENGTH];
 		str_format(aLine, sizeof(aLine), "%s: %s", Message.m_Name.c_str(), Message.m_Text.c_str());
 		GameClient()->m_Chat.AddColoredLine(aLine, TWITCH_CHAT_COLOR);
 	}
@@ -197,7 +201,7 @@ bool CTwitchChat::ExtractTagValue(const char *pTags, const char *pKey, char *pOu
 
 		if(NameLen == KeyLen && str_comp_nocase_num(p, pKey, KeyLen) == 0)
 		{
-			const int CopyLen = minimum(ValueLen, OutSize - 1);
+			const int CopyLen = std::min(ValueLen, OutSize - 1);
 			mem_copy(pOut, pValue, CopyLen);
 			pOut[CopyLen] = '\0';
 			return pOut[0] != '\0';
@@ -224,7 +228,6 @@ void CTwitchChat::Start()
 
 	{
 		std::lock_guard<std::mutex> Lock(m_Mutex);
-		str_copy(m_aChannel, aChannel, sizeof(m_aChannel));
 		m_State = EState::Connecting;
 		m_aStatusText[0] = '\0';
 		m_ReceivedMessages = 0;
@@ -408,7 +411,7 @@ bool CTwitchChat::RunConnection(const std::string &Channel, bool &ImmediateRecon
 			const int Remaining = RecvLen - (int)(pStart - aRecvBuf);
 			if(Remaining > 0)
 				mem_move(aRecvBuf, pStart, Remaining);
-			RecvLen = maximum(0, Remaining);
+			RecvLen = std::max(0, Remaining);
 			if(RecvLen >= (int)sizeof(aRecvBuf) - 1)
 				RecvLen = 0;
 			if(ConnectionLost)
@@ -482,7 +485,7 @@ void CTwitchChat::HandleIrcLine(const char *pLine)
 		const char *pSpace = str_find(p, " ");
 		if(!pSpace)
 			return;
-		const int TagLen = minimum((int)(pSpace - p), (int)sizeof(aTags) - 1);
+		const int TagLen = std::min((int)(pSpace - p), (int)sizeof(aTags) - 1);
 		mem_copy(aTags, p, TagLen);
 		aTags[TagLen] = '\0';
 		p = pSpace + 1;
@@ -497,7 +500,7 @@ void CTwitchChat::HandleIrcLine(const char *pLine)
 		return;
 
 	char aPrefix[128];
-	const int PrefixLen = minimum((int)(pPrefixEnd - p), (int)sizeof(aPrefix) - 1);
+	const int PrefixLen = std::min((int)(pPrefixEnd - p), (int)sizeof(aPrefix) - 1);
 	mem_copy(aPrefix, p, PrefixLen);
 	aPrefix[PrefixLen] = '\0';
 	p = pPrefixEnd + 1;
@@ -516,13 +519,13 @@ void CTwitchChat::HandleIrcLine(const char *pLine)
 	{
 		const char *pBang = str_find(aPrefix, "!");
 		const int NameLen = pBang ? (int)(pBang - aPrefix) : str_length(aPrefix);
-		str_copy(aName, aPrefix, minimum((int)sizeof(aName), NameLen + 1));
+		str_copy(aName, aPrefix, std::min((int)sizeof(aName), NameLen + 1));
 	}
 
 	if(aName[0] == '\0')
 		return;
 
-	char aText[MAX_LINE_LENGTH];
+	char aText[MAX_CHAT_LENGTH];
 	str_copy(aText, pMsgStart, sizeof(aText));
 	str_utf8_trim_right(aText);
 	char *pText = aText;

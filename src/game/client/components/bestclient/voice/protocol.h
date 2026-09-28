@@ -2,26 +2,34 @@
 #ifndef GAME_CLIENT_COMPONENTS_BESTCLIENT_VOICE_PROTOCOL_H
 #define GAME_CLIENT_COMPONENTS_BESTCLIENT_VOICE_PROTOCOL_H
 
+#include <base/mem.h>
 #include <base/net.h>
-#include <base/system.h>
+#include <engine/shared/uuid_manager.h>
 
 #include <cstdint>
 #include <vector>
 
 namespace BestClientVoice
 {
-constexpr uint32_t PROTOCOL_MAGIC = 0x42564331u; // BVC1
+constexpr uint32_t PROTOCOL_MAGIC = 0x42564331u;
 constexpr uint8_t PROTOCOL_VERSION = 4;
 
 constexpr int SAMPLE_RATE = 48000;
 constexpr int CHANNELS = 1;
-constexpr int FRAME_SIZE = 960; // 20ms @ 48kHz
+constexpr int FRAME_SIZE = 960;
 constexpr int MAX_OPUS_PACKET_SIZE = 400;
 constexpr int DEFAULT_PORT = 8777;
 constexpr int MAX_ROOM_KEY_LENGTH = 128;
 constexpr int INVALID_GAME_CLIENT_ID = -1;
 constexpr int CHALLENGE_NONCE_SIZE = 16;
 constexpr int MAX_VOICE_PEERS = 128;
+constexpr int CLIENT_BUILD = 300;
+constexpr int LINK_TOKEN_SIZE = 16;
+constexpr uint8_t HELLO_NAME_PRESENT = 0x9A;
+constexpr uint8_t HELLO_NAME_ABSENT = 0x99;
+constexpr uint8_t HELLO_CHANNEL_PRIMARY = 0;
+constexpr uint8_t HELLO_CHANNEL_SECONDARY = 1;
+constexpr uint8_t AUTH_REJECT_UNOFFICIAL = 1;
 
 enum EPacketType : uint8_t
 {
@@ -34,10 +42,8 @@ enum EPacketType : uint8_t
 	PACKET_PONG = 7,
 	PACKET_PEER_LIST_EX = 8,
 	PACKET_GOODBYE = 9,
-	// Challenge-response handshake (protocol v4.1+)
 	PACKET_HELLO_CHALLENGE = 21,
 	PACKET_HELLO_RESPONSE = 22,
-	// Moderator control (protocol v4.2+)
 	PACKET_MOD_AUTH_REQ = 23,
 	PACKET_MOD_AUTH_ACK = 24,
 	PACKET_MOD_PLAYER_LIST_REQ = 25,
@@ -45,9 +51,9 @@ enum EPacketType : uint8_t
 	PACKET_MOD_MUTE_REQ = 27,
 	PACKET_MOD_MUTE_ACK = 28,
 	PACKET_YOU_ARE_MUTED = 29,
-	// Challenge-response for mod auth (protocol v4.3+)
 	PACKET_MOD_AUTH_CHALLENGE = 30,
 	PACKET_MOD_AUTH_RESPONSE = 31,
+	PACKET_AUTH_REJECT = 32,
 };
 
 constexpr int MAX_PLAYER_NAME_LENGTH = 64;
@@ -81,6 +87,19 @@ inline void WriteU64(std::vector<uint8_t> &vOut, uint64_t Value)
 {
 	for(int Shift = 56; Shift >= 0; Shift -= 8)
 		vOut.push_back((uint8_t)((Value >> Shift) & 0xff));
+}
+
+inline void WriteRaw(std::vector<uint8_t> &vOut, const void *pData, int DataSize)
+{
+	if(DataSize <= 0 || pData == nullptr)
+		return;
+	const auto *pBytes = static_cast<const uint8_t *>(pData);
+	vOut.insert(vOut.end(), pBytes, pBytes + DataSize);
+}
+
+inline void WriteUuid(std::vector<uint8_t> &vOut, CUuid Uuid)
+{
+	WriteRaw(vOut, &Uuid, sizeof(Uuid));
 }
 
 inline void WriteS32(std::vector<uint8_t> &vOut, int32_t Value)
@@ -132,6 +151,15 @@ inline bool ReadU64(const uint8_t *pData, int DataSize, int &Offset, uint64_t &O
 	for(int i = 0; i < 8; ++i)
 		Out = (Out << 8) | pData[Offset + i];
 	Offset += 8;
+	return true;
+}
+
+inline bool ReadUuid(const uint8_t *pData, int DataSize, int &Offset, CUuid &Out)
+{
+	if(Offset + (int)sizeof(Out) > DataSize)
+		return false;
+	mem_copy(&Out, pData + Offset, sizeof(Out));
+	Offset += sizeof(Out);
 	return true;
 }
 

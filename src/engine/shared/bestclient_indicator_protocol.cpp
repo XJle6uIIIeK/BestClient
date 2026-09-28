@@ -2,6 +2,9 @@
 
 #include <base/hash_ctxt.h>
 #include <base/net.h>
+#include <base/str.h>
+
+#include <cstring>
 
 namespace BestClientIndicator
 {
@@ -139,7 +142,7 @@ bool ReadUuid(const uint8_t *pData, int DataSize, int &Offset, CUuid &Out)
 {
 	if(Offset + (int)sizeof(Out) > DataSize)
 		return false;
-	mem_copy(&Out, pData + Offset, sizeof(Out));
+	std::memcpy(&Out, pData + Offset, sizeof(Out));
 	Offset += sizeof(Out);
 	return true;
 }
@@ -182,7 +185,7 @@ bool ValidateProof(const char *pSharedToken, const uint8_t *pPacketData, int Pac
 	const int PayloadSize = PacketDataSize - CLIENT_PACKET_PROOF_SIZE;
 	const SHA256_DIGEST Expected = ComputeProof(pSharedToken, pPacketData, PayloadSize);
 	SHA256_DIGEST Actual{};
-	mem_copy(Actual.data, pPacketData + PayloadSize, sizeof(Actual.data));
+	std::memcpy(Actual.data, pPacketData + PayloadSize, sizeof(Actual.data));
 	return ConstantTimeDigestEqual(Actual, Expected);
 }
 
@@ -196,11 +199,11 @@ SHA256_DIGEST ComputeHmacSha256(const char *pSecret, const uint8_t *pPacketData,
 		if(SecretLength > HMAC_BLOCK_SIZE)
 		{
 			const SHA256_DIGEST HashedKey = sha256(pSecret, SecretLength);
-			mem_copy(aKey, HashedKey.data, sizeof(HashedKey.data));
+			std::memcpy(aKey, HashedKey.data, sizeof(HashedKey.data));
 		}
 		else
 		{
-			mem_copy(aKey, pSecret, SecretLength);
+			std::memcpy(aKey, pSecret, SecretLength);
 		}
 	}
 
@@ -240,7 +243,7 @@ bool ValidateHmacSha256(const char *pSecret, const uint8_t *pPacketData, int Pac
 	const int PayloadSize = PacketDataSize - CLIENT_PACKET_HMAC_SIZE;
 	const SHA256_DIGEST Expected = ComputeHmacSha256(pSecret, pPacketData, PayloadSize);
 	SHA256_DIGEST Actual{};
-	mem_copy(Actual.data, pPacketData + PayloadSize, sizeof(Actual.data));
+	std::memcpy(Actual.data, pPacketData + PayloadSize, sizeof(Actual.data));
 	return ConstantTimeDigestEqual(Actual, Expected);
 }
 
@@ -350,6 +353,15 @@ bool ReadClientVersionPacket(const uint8_t *pData, int DataSize, CClientVersionP
 	}
 
 	Out.m_ClientId = ClientId;
+	Out.m_Checksum.clear();
+	// New: optional checksum string before shared-token trailer.
+	// Legacy: version only (or version with embedded "label 8hex").
+	const int RemainingBeforeProof = DataSize - Offset - CLIENT_PACKET_PROOF_SIZE;
+	if(RemainingBeforeProof > 0)
+	{
+		if(!ReadString(pData, DataSize, Offset, Out.m_Checksum))
+			return false;
+	}
 	return Offset + CLIENT_PACKET_PROOF_SIZE == DataSize;
 }
 
@@ -444,6 +456,18 @@ bool ReadPeerVersionStatePacket(const uint8_t *pData, int DataSize, CPeerVersion
 		return false;
 	}
 	Out.m_ClientId = ClientId;
+	Out.m_Fake = false;
+	Out.m_Checksum.clear();
+	// Legacy: version only. New: version + fake u8 + checksum string.
+	if(Offset == DataSize)
+		return true;
+	uint8_t Fake = 0;
+	if(!ReadU8(pData, DataSize, Offset, Fake) ||
+		!ReadString(pData, DataSize, Offset, Out.m_Checksum))
+	{
+		return false;
+	}
+	Out.m_Fake = Fake != 0;
 	return Offset == DataSize;
 }
 
@@ -505,7 +529,7 @@ void WritePeerDevListPacket(std::vector<uint8_t> &vOut, const char *pServerAddre
 		WriteS16(vOut, ClientId);
 }
 
-void WritePeerVersionStatePacket(std::vector<uint8_t> &vOut, const char *pServerAddress, const char *pPlayerName, int ClientId, const char *pClientVersion)
+void WritePeerVersionStatePacket(std::vector<uint8_t> &vOut, const char *pServerAddress, const char *pPlayerName, int ClientId, const char *pClientVersion, bool Fake, const char *pChecksum)
 {
 	vOut.clear();
 	WriteHeader(vOut, PACKET_PEER_VERSION_STATE);
@@ -513,6 +537,8 @@ void WritePeerVersionStatePacket(std::vector<uint8_t> &vOut, const char *pServer
 	WriteString(vOut, pPlayerName);
 	WriteS16(vOut, ClientId);
 	WriteString(vOut, pClientVersion);
+	WriteU8(vOut, Fake ? 1 : 0);
+	WriteString(vOut, pChecksum ? pChecksum : "");
 }
 
 void WriteDevAuthResultPacket(std::vector<uint8_t> &vOut, const char *pServerAddress, int ClientId, bool Success)

@@ -11,6 +11,11 @@ class CQuickBinds : public CComponent
 	static void ConToggle45Degrees(IConsole::IResult *pResult, void *pUserData);
 	static void ConToggleSmallSens(IConsole::IResult *pResult, void *pUserData);
 	static void ConToggleDeepfly(IConsole::IResult *pResult, void *pUserData);
+	static void ConGotoTeleCursor(IConsole::IResult *pResult, void *pUserData);
+	static void ConGotoFinishCursor(IConsole::IResult *pResult, void *pUserData);
+
+	void GotoTeleCursor();
+	void GotoFinishCursor();
 
 	bool m_45DegreesStroke = false;
 	bool m_45DegreesLastStroke = false;

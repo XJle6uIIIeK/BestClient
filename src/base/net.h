@@ -288,6 +288,20 @@ int net_udp_send(NETSOCKET sock, const NETADDR *addr, const void *data, int size
 int net_udp_recv(NETSOCKET sock, NETADDR *addr, unsigned char **data);
 
 /**
+ * Checks whether an UDP socket was closed by the operating system.
+ *
+ * @ingroup Network-UDP
+ *
+ * @param sock Socket to check.
+ *
+ * @return `true` if the socket cannot be used anymore and has to be recreated.
+ *
+ * @remark iOS closes the sockets of apps while they are suspended. Sending on
+ * such a socket keeps failing with `EPIPE` until it is recreated.
+ */
+bool net_udp_is_broken(NETSOCKET sock);
+
+/**
  * Closes an UDP socket.
  *
  * @ingroup Network-UDP
@@ -363,38 +377,20 @@ int net_tcp_connect(NETSOCKET sock, const NETADDR *addr);
  */
 int net_tcp_connect_non_blocking(NETSOCKET sock, NETADDR bindaddr);
 
+// bestclient
 /**
- * Checks whether a non-blocking TCP connection has completed.
- *
- * @return `1` when connected, `0` while pending, and `-1` on failure.
- */
-int net_tcp_connect_poll(NETSOCKET sock);
-
-/**
- * Disables Nagle's algorithm (`TCP_NODELAY`) on a TCP socket, so small writes
- * go out immediately instead of being coalesced.
- *
- * @ingroup Network-TCP
- *
- * @param sock The socket to configure.
- *
- * @returns `0` on success.
- */
-int net_tcp_set_nodelay(NETSOCKET sock);
-
-/**
- * Connects a socket to a TCP address, blocking for at most `TimeoutMs`
- * milliseconds instead of the OS-default connect timeout.
+ * Connects a TCP socket with a timeout.
  *
  * @ingroup Network-TCP
  *
  * @param sock Socket to connect.
  * @param addr Address to connect to.
- * @param TimeoutMs Maximum time to wait for the connection to complete, in milliseconds.
+ * @param TimeoutMs Timeout in milliseconds.
  *
- * @return `0` on success, `-1` on failure or timeout.
+ * @return `0` on success.
  */
 int net_tcp_connect_timeout(NETSOCKET sock, const NETADDR *addr, int TimeoutMs);
+// bestclient
 
 /**
  * Sends data to a TCP stream.

@@ -37,23 +37,7 @@ void CDamageInd::OnRender()
 		return;
 
 	static float s_LastLocalTime = LocalTime();
-	float LifeAdjustment;
-	if(Client()->State() == IClient::STATE_DEMOPLAYBACK)
-	{
-		const IDemoPlayer::CInfo *pInfo = DemoPlayer()->BaseInfo();
-		if(pInfo->m_Paused)
-			LifeAdjustment = 0.0f;
-		else
-			LifeAdjustment = (LocalTime() - s_LastLocalTime) * pInfo->m_Speed;
-	}
-	else
-	{
-		const auto &pGameInfoObj = GameClient()->m_Snap.m_pGameInfoObj;
-		if(pGameInfoObj && pGameInfoObj->m_GameStateFlags & GAMESTATEFLAG_PAUSED)
-			LifeAdjustment = 0.0f;
-		else
-			LifeAdjustment = LocalTime() - s_LastLocalTime;
-	}
+	const float LifeAdjustment = (LocalTime() - s_LastLocalTime) * GameClient()->GetAnimationPlaybackSpeed();
 	s_LastLocalTime = LocalTime();
 
 	Graphics()->TextureSet(GameClient()->m_GameSkin.m_aSpriteStars[0]);
@@ -67,11 +51,13 @@ void CDamageInd::OnRender()
 		}
 		else
 		{
+			// bestclient
 			if(!GameClient()->OptimizerAllowRenderPos(m_aItems[i].m_Pos))
 			{
 				i++;
 				continue;
 			}
+			// bestclient
 
 			vec2 Pos = mix(m_aItems[i].m_Pos + m_aItems[i].m_Dir * 75.0f, m_aItems[i].m_Pos, std::clamp((m_aItems[i].m_RemainingLife - 0.60f) / 0.15f, 0.0f, 1.0f));
 			const float LifeAlpha = m_aItems[i].m_RemainingLife / 0.1f;

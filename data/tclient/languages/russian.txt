@@ -42,7 +42,7 @@ Dummy
 == Дамми
 
 Discord
-== Дискорд
+== Discord
 
 Profiles
 == Профили

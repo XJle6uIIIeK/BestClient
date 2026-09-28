@@ -2,9 +2,11 @@
 #include "music_player_lyrics.h"
 
 #include <base/math.h>
-#include <base/system.h>
+#include <base/dbg.h>
+#include <base/str.h>
+#include <base/time.h>
 
-#include <engine/shared/http.h>
+#include <engine/http.h>
 #include <engine/shared/json.h>
 #include <engine/textrender.h>
 
@@ -43,15 +45,27 @@ float CMusicPlayerLyrics::LyricsTextSlotWidth(float Scale, float WidthScale)
 void CMusicPlayerLyrics::TickDisplay(float Delta)
 {
 	if(m_DisplayState == EDisplayState::NotFound)
-		m_NotFoundDisplayMs += maximum(0.0f, Delta) * 1000.0f;
+		m_NotFoundDisplayMs += std::max(0.0f, Delta) * 1000.0f;
 	else if(m_DisplayState == EDisplayState::Offline)
-		m_OfflineDisplayMs += maximum(0.0f, Delta) * 1000.0f;
+		m_OfflineDisplayMs += std::max(0.0f, Delta) * 1000.0f;
 }
 
 int CMusicPlayerLyrics::ResolveDisplayLineIndex() const
 {
+	if(m_DisplayState == EDisplayState::Idle)
+		return FALLBACK_BRAND;
+	if(m_DisplayState == EDisplayState::Loading)
+		return m_TrackTitle.empty() ? FALLBACK_ELLIPSIS : FALLBACK_TITLE;
 	if(m_DisplayState == EDisplayState::NotFound)
 		return (m_NotFoundDisplayMs < (float)NOT_FOUND_HOLD_MS) ? FALLBACK_NOT_FOUND : FALLBACK_TITLE;
+	if(m_DisplayState == EDisplayState::Offline)
+	{
+		if(m_OfflineDisplayMs < (float)OFFLINE_HOLD_MS)
+			return FALLBACK_NO_CONNECTION;
+		if(!m_TrackTitle.empty())
+			return FALLBACK_TITLE;
+		return FALLBACK_BRAND;
+	}
 
 	if(m_DisplayState != EDisplayState::Ready)
 		return LINE_NONE;
@@ -69,25 +83,22 @@ int CMusicPlayerLyrics::ResolveDisplayLineIndex() const
 			return -1;
 		return 0;
 	}
-	if(m_ClockPlaying && m_CurrentLineIndex >= 0 && LineIndex >= 0 && LineIndex < m_CurrentLineIndex)
-		return m_CurrentLineIndex;
 	return LineIndex;
 }
 
 float CMusicPlayerLyrics::PreferredTextSlotWidth(ITextRender *pTextRender, float FontSize, float MaxWidth, float Scale, float WidthScale) const
 {
-	const float ClampedMax = maximum(0.0f, MaxWidth);
+	const float ClampedMax = std::max(0.0f, MaxWidth);
 	if(ClampedMax <= 0.0f)
 		return 0.0f;
 
-	// Brand and track-title fallbacks shrink to content; lyrics, errors, and countdown keep full width.
-	const bool ShowBrand = m_DisplayState == EDisplayState::Idle ||
-		(m_DisplayState == EDisplayState::Offline && m_OfflineDisplayMs >= (float)OFFLINE_HOLD_MS);
-	const bool ShowTitle = m_DisplayState == EDisplayState::NotFound && ResolveDisplayLineIndex() == FALLBACK_TITLE;
+	const int LineIndex = ResolveDisplayLineIndex();
+	const bool ShowBrand = LineIndex == FALLBACK_BRAND;
+	const bool ShowTitle = LineIndex == FALLBACK_TITLE;
 	if(!ShowBrand && !ShowTitle)
 		return ClampedMax;
 
-	const char *pText = ShowBrand ? "BestClient" : FallbackText(FALLBACK_TITLE);
+	const char *pText = ShowBrand ? FallbackText(FALLBACK_BRAND) : FallbackText(FALLBACK_TITLE);
 	if(pTextRender == nullptr || pText == nullptr || pText[0] == '\0')
 		return ClampedMax;
 
@@ -160,15 +171,13 @@ void CMusicPlayerLyrics::AbortRequest()
 
 std::string CMusicPlayerLyrics::BuildCacheKey(const char *pTitle, const char *pArtist, int64_t DurationMs)
 {
-	const int DurationSec = (int)((maximum<int64_t>(0, DurationMs) + 500) / 1000);
+	(void)DurationMs;
 	std::string Key;
 	Key.reserve(128);
-	Key += "v2|";
+	Key += "v3|";
 	Key += pArtist ? pArtist : "";
 	Key += '|';
 	Key += pTitle ? pTitle : "";
-	Key += '|';
-	Key += std::to_string(DurationSec);
 	return Key;
 }
 
@@ -297,8 +306,6 @@ void CMusicPlayerLyrics::MergeConsecutiveIdenticalLines(std::vector<SLine> &vLin
 	if(vLines.size() < 2)
 		return;
 
-	// Only drop near-duplicate timestamps of the same text (e.g. [01:00.00][01:00.05]).
-	// Merging repeats that span seconds makes karaoke progress crawl through one line.
 	static constexpr int64_t NearDuplicateMs = 150;
 
 	std::vector<SLine> vMerged;
@@ -342,7 +349,7 @@ void CMusicPlayerLyrics::StartRequest(IHttp *pHttp, const char *pTitle, const ch
 	EscapeUrl(aEscapedArtist, pArtist ? pArtist : "");
 	EscapeUrl(aEscapedAlbum, pAlbum ? pAlbum : "");
 
-	const int DurationSec = (int)((maximum<int64_t>(0, DurationMs) + 500) / 1000);
+	const int DurationSec = (int)((std::max<int64_t>(0, DurationMs) + 500) / 1000);
 	char aUrl[2048];
 	if(DurationSec >= 1 && DurationSec <= 3600)
 	{
@@ -372,87 +379,77 @@ void CMusicPlayerLyrics::ProcessRequest()
 	if(!m_pRequest || !m_pRequest->Done())
 		return;
 
-	std::shared_ptr<CHttpRequest> pFinished = m_pRequest;
+	std::shared_ptr<IHttpRequest> pFinished = m_pRequest;
 	m_pRequest.reset();
 	const std::string FinishedKey = m_RequestKey;
 	m_RequestKey.clear();
+	const bool ApplyToActive = !FinishedKey.empty() && FinishedKey == m_ActiveKey;
 
-	if(FinishedKey != m_ActiveKey)
-		return;
-
-	// Done() is also true for ERROR/ABORTED — must not call StatusCode() unless DONE.
-	if(pFinished->State() != EHttpState::DONE)
-	{
+	auto FailOffline = [&]() {
+		if(!ApplyToActive)
+			return;
 		m_DisplayState = EDisplayState::Offline;
 		m_vLines.clear();
 		ClearActiveTrack();
 		m_OfflineRetryAt = time_get() + time_freq() * LYRICS_OFFLINE_RETRY_MS / 1000;
+	};
+
+	if(pFinished->State() != EHttpState::DONE || pFinished->StatusCode() == 0)
+	{
+		FailOffline();
 		return;
 	}
 
 	const int StatusCode = pFinished->StatusCode();
-	if(StatusCode == 0)
+	if(StatusCode != 404 && (StatusCode < 200 || StatusCode >= 300))
 	{
-		m_DisplayState = EDisplayState::Offline;
-		m_vLines.clear();
-		ClearActiveTrack();
-		m_OfflineRetryAt = time_get() + time_freq() * LYRICS_OFFLINE_RETRY_MS / 1000;
+		FailOffline();
 		return;
 	}
 
-	if(StatusCode == 404)
+	SCacheEntry Entry;
+	Entry.m_State = EDisplayState::NotFound;
+	if(StatusCode != 404)
 	{
-		SCacheEntry Entry;
-		Entry.m_State = EDisplayState::NotFound;
+		json_value *pRoot = pFinished->ResultJson();
+		if(pRoot != nullptr && pRoot != &json_value_none && pRoot->type == json_object)
+		{
+			const char *pSynced = JsonStringOrEmpty(json_object_get(pRoot, "syncedLyrics"));
+			if(ParseSyncedLyrics(pSynced, Entry.m_vLines))
+				Entry.m_State = EDisplayState::Ready;
+		}
+		if(pRoot)
+			json_value_free(pRoot);
+	}
+
+	if(!FinishedKey.empty())
+	{
 		if(m_Cache.size() >= LYRICS_CACHE_MAX)
 			m_Cache.clear();
 		m_Cache[FinishedKey] = Entry;
+	}
+	if(ApplyToActive)
 		ApplyCacheEntry(Entry);
-		return;
-	}
-
-	if(StatusCode < 200 || StatusCode >= 300)
-	{
-		m_DisplayState = EDisplayState::Offline;
-		m_vLines.clear();
-		ClearActiveTrack();
-		m_OfflineRetryAt = time_get() + time_freq() * LYRICS_OFFLINE_RETRY_MS / 1000;
-		return;
-	}
-
-	json_value *pRoot = pFinished->ResultJson();
-	SCacheEntry Entry;
-	Entry.m_State = EDisplayState::NotFound;
-	if(pRoot != nullptr && pRoot != &json_value_none && pRoot->type == json_object)
-	{
-		const char *pSynced = JsonStringOrEmpty(json_object_get(pRoot, "syncedLyrics"));
-		if(ParseSyncedLyrics(pSynced, Entry.m_vLines))
-			Entry.m_State = EDisplayState::Ready;
-	}
-	if(pRoot)
-		json_value_free(pRoot);
-
-	if(m_Cache.size() >= LYRICS_CACHE_MAX)
-		m_Cache.clear();
-	m_Cache[FinishedKey] = Entry;
-	ApplyCacheEntry(Entry);
 }
 
 int64_t CMusicPlayerLyrics::CurrentPositionMs() const
 {
-	int64_t Position = maximum<int64_t>(0, m_ClockPositionMs);
+	int64_t Position = std::max<int64_t>(0, m_ClockPositionMs);
 	if(m_ClockPlaying && m_ClockTick > 0)
 		Position += ((time_get() - m_ClockTick) * 1000) / time_freq();
 	if(m_ClockDurationMs > 0)
-		Position = minimum(Position, m_ClockDurationMs);
+		Position = std::min(Position, m_ClockDurationMs);
 	return Position;
 }
 
 void CMusicPlayerLyrics::SyncMediaClock(int64_t SnapshotPositionMs, int64_t DurationMs, bool Playing, bool ForceReset)
 {
-	SnapshotPositionMs = maximum<int64_t>(0, SnapshotPositionMs);
-	m_ClockDurationMs = maximum<int64_t>(0, DurationMs);
+	SnapshotPositionMs = std::max<int64_t>(0, SnapshotPositionMs);
+	m_ClockDurationMs = std::max<int64_t>(0, DurationMs);
 	const int64_t Now = time_get();
+
+	if(!ForceReset && m_ClockTick != 0 && SnapshotPositionMs + BACKWARDS_SEEK_THRESHOLD_MS < CurrentPositionMs())
+		ClearLayoutState();
 
 	if(ForceReset || m_ClockTick == 0 || !Playing)
 	{
@@ -462,27 +459,25 @@ void CMusicPlayerLyrics::SyncMediaClock(int64_t SnapshotPositionMs, int64_t Dura
 		return;
 	}
 
-	// Follow extrapolated media position 1:1. ApplySnapshot no longer sawtooths
-	// backwards on stale polls, so this stays smooth and on timing.
 	m_ClockPositionMs = SnapshotPositionMs;
 	m_ClockTick = Now;
 	m_ClockPlaying = true;
 	if(m_ClockDurationMs > 0)
-		m_ClockPositionMs = minimum(m_ClockPositionMs, m_ClockDurationMs);
+		m_ClockPositionMs = std::min(m_ClockPositionMs, m_ClockDurationMs);
 }
 
 void CMusicPlayerLyrics::Update(IHttp *pHttp, const char *pTitle, const char *pArtist, const char *pAlbum, int64_t DurationMs, int64_t SnapshotPositionMs, bool Playing)
 {
 	ProcessRequest();
 
-	m_TrackTitle = (pTitle != nullptr && pTitle[0] != '\0') ? pTitle : "";
+	if(pTitle != nullptr && pTitle[0] != '\0')
+		m_TrackTitle = pTitle;
 
 	const bool HasIdentity = pTitle && pTitle[0] != '\0' && pArtist && pArtist[0] != '\0';
 	if(!HasIdentity)
 	{
 		if(!m_ActiveKey.empty())
 		{
-			AbortRequest();
 			m_ActiveKey.clear();
 			m_DisplayState = EDisplayState::Idle;
 			m_vLines.clear();
@@ -496,6 +491,15 @@ void CMusicPlayerLyrics::Update(IHttp *pHttp, const char *pTitle, const char *pA
 	const bool NewTrack = Key != m_ActiveKey;
 	if(NewTrack)
 	{
+		if(m_pRequest && m_RequestKey == Key)
+		{
+			m_ActiveKey = Key;
+			if(m_DisplayState == EDisplayState::Idle)
+				m_DisplayState = EDisplayState::Loading;
+			SyncMediaClock(SnapshotPositionMs, DurationMs, Playing, true);
+			return;
+		}
+
 		AbortRequest();
 		m_ActiveKey = Key;
 		m_vLines.clear();
@@ -558,7 +562,7 @@ float CMusicPlayerLyrics::LineProgress(int LineIndex, int64_t PositionMs) const
 	const int64_t StartMs = m_vLines[LineIndex].m_StartMs;
 	int64_t EndMs = StartMs + 4000;
 	if(LineIndex + 1 < (int)m_vLines.size())
-		EndMs = maximum(StartMs + 1, m_vLines[LineIndex + 1].m_StartMs);
+		EndMs = std::max(StartMs + 1, m_vLines[LineIndex + 1].m_StartMs);
 
 	if(PositionMs <= StartMs)
 		return 0.0f;
@@ -584,8 +588,14 @@ float CMusicPlayerLyrics::CountdownProgress(int CountdownIndex, int64_t Remainin
 
 const char *CMusicPlayerLyrics::FallbackText(int Index) const
 {
+	if(Index == FALLBACK_NO_CONNECTION)
+		return "No connection";
+	if(Index == FALLBACK_ELLIPSIS)
+		return "…";
 	if(Index == FALLBACK_NOT_FOUND)
 		return "Lyrics not found";
+	if(Index == FALLBACK_BRAND)
+		return "BestClient";
 	if(Index == FALLBACK_TITLE)
 		return m_TrackTitle.empty() ? "Unknown title" : m_TrackTitle.c_str();
 	return "";
@@ -634,7 +644,6 @@ void CMusicPlayerLyrics::EnsureLayout(ITextRender *pTextRender, float FontSize, 
 	m_vCharMetrics.clear();
 	m_BaseLineWidth = pTextRender->TextWidth(FontSize, Text.c_str(), -1, -1.0f);
 
-	// Prefix widths via full-string slices so kerning/bearing match the final draw.
 	const char *p = Text.c_str();
 	while(*p)
 	{
@@ -717,7 +726,7 @@ float CMusicPlayerLyrics::PlayheadXInLine(float ProgressChars) const
 
 	const int CharCount = (int)m_vCharMetrics.size();
 	const float Clamped = std::clamp(ProgressChars, 0.0f, (float)CharCount);
-	const int Index = minimum((int)Clamped, CharCount - 1);
+	const int Index = std::min((int)Clamped, CharCount - 1);
 	const float Frac = Clamped - (float)Index;
 
 	const float Prefix = m_vCharMetrics[Index].m_PrefixWidth;
@@ -725,7 +734,7 @@ float CMusicPlayerLyrics::PlayheadXInLine(float ProgressChars) const
 	if(Index + 1 < CharCount)
 		CharWidth = m_vCharMetrics[Index + 1].m_PrefixWidth - Prefix;
 	else
-		CharWidth = maximum(0.0f, m_BaseLineWidth - Prefix);
+		CharWidth = std::max(0.0f, m_BaseLineWidth - Prefix);
 
 	return Prefix + CharWidth * std::clamp(Frac, 0.0f, 1.0f);
 }
@@ -736,7 +745,6 @@ float CMusicPlayerLyrics::ComputeTextStartX(float AreaLeft, float AreaWidth, flo
 
 	if(m_BaseLineWidth <= AreaWidth)
 	{
-		// Short line: keep whole line inside the area; playhead walks inside it.
 		const float MinStartX = AreaLeft + AreaWidth - m_BaseLineWidth;
 		const float MaxStartX = AreaLeft;
 		if(MinStartX >= MaxStartX)
@@ -744,9 +752,8 @@ float CMusicPlayerLyrics::ComputeTextStartX(float AreaLeft, float AreaWidth, flo
 		return std::clamp(IdealStartX, MinStartX, MaxStartX);
 	}
 
-	// Long line: start pinned at center, end pinned so last glyph stays on the right.
-	const float MaxStartX = CenterX; // progress 0: first char at center
-	const float MinStartX = AreaLeft + AreaWidth - m_BaseLineWidth; // progress 1: last char at right edge
+	const float MaxStartX = CenterX;
+	const float MinStartX = AreaLeft + AreaWidth - m_BaseLineWidth;
 	return std::clamp(IdealStartX, MinStartX, MaxStartX);
 }
 
@@ -757,40 +764,6 @@ void CMusicPlayerLyrics::Render(ITextRender *pTextRender, CUi *pUi, const CUIRec
 	if(m_vColorSplits.capacity() < 3)
 		m_vColorSplits.reserve(3);
 
-	const char *pStatusText = nullptr;
-	bool WhiteStatusText = false;
-	switch(m_DisplayState)
-	{
-	case EDisplayState::Idle:
-		pStatusText = "BestClient";
-		WhiteStatusText = true;
-		break;
-	case EDisplayState::Loading:
-		pStatusText = "…";
-		break;
-	case EDisplayState::NotFound:
-		break;
-	case EDisplayState::Offline:
-		if(m_OfflineDisplayMs < (float)OFFLINE_HOLD_MS)
-			pStatusText = "No connection";
-		else
-		{
-			pStatusText = "BestClient";
-			WhiteStatusText = true;
-		}
-		break;
-	case EDisplayState::Ready:
-		break;
-	}
-
-	if(pStatusText != nullptr)
-	{
-		pTextRender->TextColor(WhiteStatusText ? LYRICS_PASSED_COLOR : LYRICS_UPCOMING_COLOR);
-		const float Width = pTextRender->TextWidth(FontSize, pStatusText, -1, -1.0f);
-		pTextRender->Text(Area.x + (Area.w - Width) * 0.5f, Area.y + (Area.h - FontSize) * 0.5f, FontSize, pStatusText, -1.0f);
-		return;
-	}
-
 	const int64_t PositionMs = CurrentPositionMs();
 	int LineIndex = ResolveDisplayLineIndex();
 	int64_t CountdownRemainingMs = 0;
@@ -800,8 +773,12 @@ void CMusicPlayerLyrics::Render(ITextRender *pTextRender, CUi *pUi, const CUIRec
 	if(LineIndex != m_CurrentLineIndex)
 	{
 		const bool SequentialForward =
-			m_CurrentLineIndex != LINE_NONE && LineIndex == m_CurrentLineIndex + 1;
-		if(SequentialForward)
+			m_CurrentLineIndex != LINE_NONE &&
+			LineIndex == m_CurrentLineIndex + 1;
+		const bool MessageToResult =
+			(m_CurrentLineIndex == FALLBACK_NOT_FOUND || m_CurrentLineIndex == FALLBACK_NO_CONNECTION) &&
+			(LineIndex == FALLBACK_TITLE || LineIndex == FALLBACK_BRAND);
+		if(SequentialForward || MessageToResult)
 		{
 			m_OutgoingLineIndex = m_CurrentLineIndex;
 			m_LineTransitionT = 0.0f;
@@ -830,12 +807,12 @@ void CMusicPlayerLyrics::Render(ITextRender *pTextRender, CUi *pUi, const CUIRec
 		return;
 
 	const bool FallbackMode = IsFallbackIndex(m_CurrentLineIndex);
-	const bool TitleMarquee = m_CurrentLineIndex == FALLBACK_TITLE && m_BaseLineWidth > Area.w + 0.5f;
+	const bool TitleMarquee = m_CurrentLineIndex == FALLBACK_TITLE && m_LineTransitionT >= 1.0f && m_BaseLineWidth > Area.w + 0.5f;
 	if(TitleMarquee)
 	{
 		const float Gap = FontSize * LYRICS_TITLE_MARQUEE_GAP_FACTOR;
 		const float LoopW = m_BaseLineWidth + Gap;
-		const float Speed = maximum(22.0f, FontSize * 2.8f);
+		const float Speed = std::max(22.0f, FontSize * 2.8f);
 		m_TitleMarqueeOffset += Delta * Speed;
 		if(m_TitleMarqueeOffset >= LoopW)
 			m_TitleMarqueeOffset = fmodf(m_TitleMarqueeOffset, LoopW);
@@ -871,7 +848,6 @@ void CMusicPlayerLyrics::Render(ITextRender *pTextRender, CUi *pUi, const CUIRec
 	const float OutgoingY = BaseY - SlideT * Area.h;
 
 	auto DrawDisplay = [&](int DrawIndex, float X, float Y, float ProgressCharsForColor, float Alpha, int ColorMode) {
-		// ColorMode: 0=karaoke wipe, 1=all upcoming (gray), 2=all passed (white)
 		if(DrawIndex == LINE_NONE || Alpha <= 0.001f)
 			return;
 		if(!IsCountdownIndex(DrawIndex) && !IsFallbackIndex(DrawIndex) && (DrawIndex < 0 || DrawIndex >= (int)m_vLines.size()))
@@ -930,7 +906,7 @@ void CMusicPlayerLyrics::Render(ITextRender *pTextRender, CUi *pUi, const CUIRec
 			pTextRender->TextEx(&Cursor, pText, -1);
 		};
 
-		const bool MarqueeCopy = DrawIndex == FALLBACK_TITLE && TextW > Area.w + 0.5f;
+		const bool MarqueeCopy = DrawIndex == m_CurrentLineIndex && TitleMarquee;
 		DrawOnce(X);
 		if(MarqueeCopy)
 			DrawOnce(X + TextW + FontSize * LYRICS_TITLE_MARQUEE_GAP_FACTOR);
@@ -956,15 +932,15 @@ void CMusicPlayerLyrics::Render(ITextRender *pTextRender, CUi *pUi, const CUIRec
 			OutWidth = pTextRender->TextWidth(FontSize, m_vLines[m_OutgoingLineIndex].m_Text.c_str(), -1, -1.0f);
 		}
 		const float OutX = CenterX - OutWidth * 0.5f;
-		const int OutColorMode = (m_OutgoingLineIndex == FALLBACK_NOT_FOUND) ? 1 : 2;
+		const int OutColorMode = IsMutedFallback(m_OutgoingLineIndex) ? 1 : 2;
 		DrawDisplay(m_OutgoingLineIndex, OutX, OutgoingY, 0.0f, 1.0f - SlideT, OutColorMode);
 	}
 
 	const float ActiveAlpha = m_OutgoingLineIndex != LINE_NONE ? SlideT : 1.0f;
 	int ActiveColorMode = 0;
-	if(m_CurrentLineIndex == FALLBACK_NOT_FOUND)
+	if(IsMutedFallback(m_CurrentLineIndex))
 		ActiveColorMode = 1;
-	else if(m_CurrentLineIndex == FALLBACK_TITLE)
+	else if(m_CurrentLineIndex == FALLBACK_TITLE || m_CurrentLineIndex == FALLBACK_BRAND)
 		ActiveColorMode = 2;
 	DrawDisplay(m_CurrentLineIndex, TextStartX, IncomingY, ProgressChars, ActiveAlpha, ActiveColorMode);
 }

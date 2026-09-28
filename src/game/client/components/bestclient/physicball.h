@@ -1,3 +1,4 @@
+/* Copyright © 2026 BestProject Team */
 #ifndef GAME_CLIENT_COMPONENTS_BESTCLIENT_PHYSICBALL_H
 #define GAME_CLIENT_COMPONENTS_BESTCLIENT_PHYSICBALL_H
 
@@ -10,10 +11,6 @@
 #include <cstdint>
 #include <vector>
 
-// The rendered quad is larger than the ball's physical body, the same way a tee's
-// skin is larger than its physical size. Every collision radius in this component is
-// derived from this single scale, so raising it (towards ~0.34) makes balls rest
-// flush against the ground and against each other instead of visually overlapping.
 constexpr float PhysicBallRadiusScale = 0.25f;
 
 class CBall
@@ -25,13 +22,11 @@ public:
 	vec2 m_Vel;
 
 	bool m_Grounded = false;
-	// Resting on another ball that is itself grounded or asleep, so stacks can sleep too.
 	bool m_Supported = false;
 	bool m_Asleep = false;
 	bool m_Dead = false;
 	float m_RestTime = 0.0f;
 
-	int m_TuneZone = 0;
 	float m_Rotation = 0.0f;
 
 	CBall(vec2 Pos, vec2 Vel, float Size) :
@@ -59,6 +54,7 @@ class CPhysicBalls : public CComponent
 	static void ConResetPhysicBalls(IConsole::IResult *pResult, void *pUserData);
 
 	vec2 PlayerPos(float BallSize) const;
+	vec2 GetCursorWorldPos() const;
 
 	void RenderBalls();
 	void Update(float Dt);
@@ -82,11 +78,8 @@ class CPhysicBalls : public CComponent
 	bool PressedFire() const;
 	int CurrentWeapon() const;
 
-	// Half extent of the axis aligned box, i.e. the ball radius.
 	bool TestBox(vec2 Pos, float HalfExtent) const;
 
-	// State that is identical for every ball, resolved once per physics step instead
-	// of once per ball.
 	struct CPlayerCollider
 	{
 		vec2 m_Pos;
@@ -102,8 +95,6 @@ class CPhysicBalls : public CComponent
 	bool m_FirePressed = false;
 	void UpdateStepState();
 
-	// Uniform grid broadphase, hashed into a flat bucket table so it does not depend
-	// on the map size and needs no per-step allocations once warmed up.
 	std::vector<uint64_t> m_vBallCellKeys;
 	std::vector<uint32_t> m_vBucketStart;
 	std::vector<uint32_t> m_vBucketCursor;
@@ -131,4 +122,4 @@ public:
 	void OnStateChange(int NewState, int OldState) override;
 };
 
-#endif // GAME_CLIENT_COMPONENTS_BESTCLIENT_PHYSICBALL_H
+#endif

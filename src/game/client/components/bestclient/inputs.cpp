@@ -9,7 +9,6 @@
 
 namespace
 {
-	// Fast: legacy ms-based prediction (20ms per tick).
 	float FastModeOffsetTicks()
 	{
 		if(g_Config.m_BcInputs != BC_INPUTS_FAST || g_Config.m_TcFastInputAmount <= 0)
@@ -17,7 +16,6 @@ namespace
 		return g_Config.m_TcFastInputAmount / 20.0f;
 	}
 
-	// Best: tick-based prediction (0.01 ticks) with smoothing and latency compensation.
 	float BestModeOffsetTicks()
 	{
 		if(g_Config.m_BcInputs != BC_INPUTS_BEST || g_Config.m_BcBestInputAmount <= 0)
@@ -34,7 +32,6 @@ namespace
 		return Offset;
 	}
 
-	// Saiko: tick-based prediction (0.01 ticks).
 	float SaikoModeOffsetTicks()
 	{
 		if(g_Config.m_BcInputs != BC_INPUTS_SAIKO || g_Config.m_BcSaikoInputAmount <= 0)
@@ -42,7 +39,6 @@ namespace
 		return g_Config.m_BcSaikoInputAmount / 100.0f;
 	}
 
-	// Delta: tick-based prediction (0.01 ticks).
 	float DeltaModeOffsetTicks()
 	{
 		if(g_Config.m_BcInputs != BC_INPUTS_DELTA || g_Config.m_BcDeltaInputAmount <= 0)
@@ -50,7 +46,6 @@ namespace
 		return g_Config.m_BcDeltaInputAmount / 100.0f;
 	}
 
-	// F: original fclient fast-input prediction (0.001 ticks), see CGameClient::GetFastInputPos for the velocity-extrapolation logic.
 	float FModeOffsetTicks()
 	{
 		if(g_Config.m_BcInputs != BC_INPUTS_F || g_Config.m_BcFInputAmount <= 0)
@@ -76,8 +71,6 @@ int BcInputs::PredictionTicks(float OffsetTicks)
 {
 	if(OffsetTicks <= 0.0f)
 		return 0;
-	// Saiko previously used ceil(offset+1) for an old FinalTickSelf display path; keep the
-	// horizon aligned with ApplyOffset so fallback cores are not ~1 tick ahead of the sample.
 	return (int)std::ceil(OffsetTicks);
 }
 

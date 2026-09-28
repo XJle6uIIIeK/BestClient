@@ -2,7 +2,6 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "ui_listbox.h"
 
-#include <base/system.h>
 #include <base/vmath.h>
 
 #include <engine/config.h>
@@ -26,6 +25,9 @@ void CListBox::Reset()
 	m_ScrollbarMargin = 5.0f;
 	m_HasHeader = false;
 	m_Active = true;
+	// bestclient
+	m_SuppressSelectionHighlight = false;
+	// bestclient
 }
 
 void CListBox::DoHeader(const CUIRect *pRect, const char *pTitle, float HeaderHeight, float Spacing)
@@ -80,6 +82,9 @@ void CListBox::DoStart(float RowHeight, int NumItems, int ItemsPerRow, int RowsP
 	m_ListBoxItemsPerRow = ItemsPerRow;
 	m_ListBoxItemActivated = false;
 	m_ListBoxItemSelected = false;
+	// bestclient
+	m_SuppressSelectionHighlight = false;
+	// bestclient
 
 	// handle input
 	if(m_Active && !Input()->ModifierIsPressed() && !Input()->ShiftIsPressed() && !Input()->AltIsPressed())
@@ -103,14 +108,12 @@ void CListBox::DoStart(float RowHeight, int NumItems, int ItemsPerRow, int RowsP
 	}
 
 	// setup the scrollbar
-	vec2 ScrollOffset = vec2(0.0f, 0.0f);
 	CScrollRegionParams ScrollParams;
-	ScrollParams.m_ScrollbarWidth = ScrollbarWidthMax();
+	ScrollParams.m_ScrollbarThickness = ScrollbarWidthMax();
 	ScrollParams.m_ScrollbarMargin = ScrollbarMargin();
 	ScrollParams.m_ScrollUnit = (m_ListBoxRowHeight + m_AutoSpacing) * RowsPerScroll;
-	ScrollParams.m_Flags = ForceShowScrollbar ? CScrollRegionParams::FLAG_CONTENT_STATIC_WIDTH : 0;
-	m_ScrollRegion.Begin(&m_ListBoxView, &ScrollOffset, &ScrollParams);
-	m_ListBoxView.y += ScrollOffset.y;
+	ScrollParams.m_ForceShowScrollbar = ForceShowScrollbar;
+	m_ScrollRegion.Begin(&m_ListBoxView, &ScrollParams);
 }
 
 CListboxItem CListBox::DoNextRow()
@@ -169,15 +172,35 @@ CListboxItem CListBox::DoNextItem(const void *pId, bool Selected, float CornerRa
 			}
 		}
 
-		Item.m_Rect.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, m_Active ? 0.5f : 0.33f), IGraphics::CORNER_ALL, CornerRadius);
+		// bestclient
+		if(!m_SuppressSelectionHighlight)
+			Item.m_Rect.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, m_Active ? 0.5f : 0.33f), IGraphics::CORNER_ALL, CornerRadius);
+		// bestclient
 	}
+	// bestclient
+	const bool SuppressHighlight = m_SuppressSelectionHighlight;
+	m_SuppressSelectionHighlight = false;
+	// bestclient
 	if(Ui()->HotItem() == pId && !m_ScrollRegion.Animating())
 	{
-		Item.m_Rect.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, 0.33f), IGraphics::CORNER_ALL, CornerRadius);
+		// bestclient
+		if(!SuppressHighlight)
+			Item.m_Rect.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, 0.33f), IGraphics::CORNER_ALL, CornerRadius);
+		// bestclient
 	}
 
 	return Item;
 }
+
+// bestclient
+CUIRect CListBox::DoExtraRow(float Height, bool ScrollHere)
+{
+	CUIRect Row;
+	m_ListBoxView.HSplitTop(Height, &Row, &m_ListBoxView);
+	m_ScrollRegion.AddRect(Row, ScrollHere);
+	return Row;
+}
+// bestclient
 
 CListboxItem CListBox::DoSubheader()
 {

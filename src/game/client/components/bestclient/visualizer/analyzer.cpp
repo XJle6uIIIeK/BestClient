@@ -4,6 +4,33 @@
 #include <base/math.h>
 
 #include <algorithm>
+
+template<typename T>
+constexpr T minimum(T a, T b)
+{
+	return (std::min)(a, b);
+}
+
+template<typename T>
+constexpr T maximum(T a, T b)
+{
+	return (std::max)(a, b);
+}
+
+template<typename T>
+constexpr T minimum(T a, T b, T c)
+{
+	return (std::min)(a, (std::min)(b, c));
+}
+
+template<typename T>
+constexpr T maximum(T a, T b, T c)
+{
+	return (std::max)(a, (std::max)(b, c));
+}
+
+
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
@@ -373,7 +400,6 @@ void CVisualizerAnalyzer::Analyze(SVisualizerFrame &OutFrame)
 	else
 		m_BandEnergyPeak = m_BandEnergyPeak * 0.995f + InputRms * 0.005f;
 	m_BandEnergyPeak = std::clamp(m_BandEnergyPeak, 1e-6f, 0.25f);
-	// Slight headroom for quieter loopback levels without flattening all bars.
 	const float GlobalRmsGain = std::clamp(0.018f / m_BandEnergyPeak, 0.35f, 4.5f);
 
 	RunFft(m_vMainBuffer, m_vMainTwiddles, m_vMainBitReverse);

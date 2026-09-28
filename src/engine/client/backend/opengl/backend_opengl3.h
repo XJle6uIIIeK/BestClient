@@ -12,6 +12,10 @@
 
 #include "backend_opengl.h"
 
+// bestclient
+#include <game/client/components/bestclient/motion_blur_opengl.h>
+// bestclient
+
 class CGLSLPrimitiveExProgram;
 class CGLSLQuadProgram;
 class CGLSLSpriteMultipleProgram;
@@ -79,15 +83,12 @@ protected:
 	void UploadStreamBufferData(EPrimitiveType PrimitiveType, const void *pVertices, size_t VertSize, unsigned int PrimitiveCount, bool AsTex3D = false);
 	void RenderText(const CCommandBuffer::SState &State, int DrawNum, int TextTextureIndex, int TextOutlineTextureIndex, int TextureSize, const ColorRGBA &TextColor, const ColorRGBA &TextOutlineColor);
 
-	TWGLuint m_MotionBlurTexture = 0;
-	uint32_t m_MotionBlurTexWidth = 0;
-	uint32_t m_MotionBlurTexHeight = 0;
-	bool m_MotionBlurHistoryValid = false;
-	bool m_MotionBlurEnabledLastFrame = false;
-
+	// bestclient
+	SBcMotionBlurOpenGLState m_MotionBlur;
 	void EnsureMotionBlurTexture();
 	void DestroyMotionBlurTexture();
 	void RenderMotionBlurGL();
+	// bestclient
 
 	void TextureUpdate(int Slot, int X, int Y, int Width, int Height, int GLFormat, uint8_t *pTexData);
 	void TextureCreate(int Slot, int Width, int Height, int GLFormat, int GLStoreFormat, int Flags, uint8_t *pTexData);
@@ -97,12 +98,15 @@ protected:
 	void Cmd_Texture_Destroy(const CCommandBuffer::SCommand_Texture_Destroy *pCommand) override;
 	void Cmd_Texture_Create(const CCommandBuffer::SCommand_Texture_Create *pCommand) override;
 	void Cmd_TextTexture_Update(const CCommandBuffer::SCommand_TextTexture_Update *pCommand) override;
+	void Cmd_Texture_Update(const CCommandBuffer::SCommand_Texture_Update *pCommand) override;
 	void Cmd_TextTextures_Destroy(const CCommandBuffer::SCommand_TextTextures_Destroy *pCommand) override;
 	void Cmd_TextTextures_Create(const CCommandBuffer::SCommand_TextTextures_Create *pCommand) override;
 	void Cmd_Clear(const CCommandBuffer::SCommand_Clear *pCommand) override;
 	void Cmd_Render(const CCommandBuffer::SCommand_Render *pCommand) override;
 	void Cmd_RenderTex3D(const CCommandBuffer::SCommand_RenderTex3D *pCommand) override;
+	// bestclient
 	void Cmd_BeforeSwap() override;
+	// bestclient
 
 	void Cmd_CreateBufferObject(const CCommandBuffer::SCommand_CreateBufferObject *pCommand) override;
 	void Cmd_RecreateBufferObject(const CCommandBuffer::SCommand_RecreateBufferObject *pCommand) override;

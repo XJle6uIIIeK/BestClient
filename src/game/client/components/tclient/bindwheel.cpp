@@ -8,8 +8,6 @@
 #include <game/client/render.h>
 #include <game/client/ui.h>
 
-#include <algorithm>
-
 CBindWheel::CBindWheel()
 {
 	OnReset();
@@ -171,13 +169,15 @@ void CBindWheel::OnRender()
 		return std::fmod(x + y, y);
 	};
 
-	const float WheelScale = std::clamp(g_Config.m_BcWheelScale / 100.0f, 0.5f, 2.0f);
+	// bestclient
+	const float WheelScale = std::clamp(g_Config.m_BcWheelScale / 100.0f, 0.5f, 1.0f);
 	const float s_InnerOuterMouseBoundaryRadius = 110.0f * WheelScale;
 	const float s_OuterMouseLimitRadius = 170.0f * WheelScale;
-	const float s_OuterItemRadius = 140.0f * WheelScale; // 10.0f less than emoticons for extra text space
+	const float s_OuterItemRadius = 140.0f * WheelScale;
 	const float s_OuterCircleRadius = 190.0f * WheelScale;
 	const float s_FontSize = 12.0f * WheelScale;
 	const float s_FontSizeSelected = 18.0f * WheelScale;
+	// bestclient
 
 	const float AnimationTime = (float)g_Config.m_TcAnimateWheelTime / 1000.0f;
 	const float ItemAnimationTime = AnimationTime / 2.0f;
@@ -302,13 +302,20 @@ void CBindWheel::OnRender()
 			TextRender()->TextColor(1.0f, 1.0f, 1.0f, aAnimationPhase[1]);
 		}
 		const vec2 Pos = vec2(Screen.x, Screen.y) + vec2(Screen.w, Screen.h) / 2.0f + direction(Angle) * s_OuterItemRadius * aAnimationPhase[1];
-		const CUIRect Rect = CUIRect{Pos.x - 50.0f * WheelScale, Pos.y - 50.0f * WheelScale, 100.0f * WheelScale, 100.0f * WheelScale};
+		const CUIRect Rect = CUIRect{Pos.x - 50.0f, Pos.y - 50.0f, 100.0f, 100.0f};
 		Ui()->DoLabel(&Rect, pName, FontSize, TEXTALIGN_MC);
 	}
 	TextRender()->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 	Graphics()->WrapNormal();
 
-	RenderTools()->RenderCursor(GameClient()->m_Emoticon.m_SelectorMouse + vec2(Screen.w, Screen.h) / 2.0f, 24.0f * WheelScale, aAnimationPhase[0]);
+	// For future middle circle usage
+	// Graphics()->TextureClear();
+	// Graphics()->QuadsBegin();
+	// Graphics()->SetColor(1.0f, 1.0f, 1.0f, 0.3f * AnimationPhase3);
+	// DrawCircle(Screen.w / 2.0f, Screen.h / 2.0f, s_InnerCircleRadius * AnimationPhase3, 64);
+	// Graphics()->QuadsEnd();
+
+	RenderTools()->RenderCursor(GameClient()->m_Emoticon.m_SelectorMouse + vec2(Screen.w, Screen.h) / 2.0f, 24.0f, aAnimationPhase[0]);
 }
 
 void CBindWheel::ExecuteBind(int Bind)

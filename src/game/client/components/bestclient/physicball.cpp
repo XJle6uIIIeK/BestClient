@@ -1,3 +1,4 @@
+/* Copyright © 2026 BestProject Team */
 #include "physicball.h"
 
 #include <base/color.h>
@@ -16,7 +17,6 @@
 
 #include <game/client/components/particles.h>
 #include <game/client/gameclient.h>
-#include <game/client/render.h>
 #include <game/client/skin.h>
 #include <game/collision.h>
 #include <game/gamecore.h>
@@ -79,7 +79,7 @@ void CPhysicBalls::NewBallCursor(float Size)
 	if(Client()->State() != IClient::STATE_ONLINE)
 		return;
 
-	vec2 Pos = GameClient()->BcGetCursorWorldPos();
+	vec2 Pos = GetCursorWorldPos();
 	vec2 OutPos;
 	if(GetNearestAirPos(Pos, Pos, &OutPos, Size))
 		Pos = OutPos;
@@ -92,8 +92,10 @@ void CPhysicBalls::ConNewPhysicBall(IConsole::IResult *pResult, void *pUserData)
 {
 	CPhysicBalls *pSelf = static_cast<CPhysicBalls *>(pUserData);
 	float Size = pResult->NumArguments() > 0 ? pResult->GetFloat(0) : PhysicBallSize;
+	const int Count = std::clamp(g_Config.m_BcPhysicBallsSpawnCount, 1, 50);
 
-	pSelf->NewBallPlayer(Size);
+	for(int i = 0; i < Count; i++)
+		pSelf->NewBallPlayer(Size);
 }
 
 void CPhysicBalls::ConNewPhysicBallAtCursor(IConsole::IResult *pResult, void *pUserData)
@@ -101,8 +103,10 @@ void CPhysicBalls::ConNewPhysicBallAtCursor(IConsole::IResult *pResult, void *pU
 	CPhysicBalls *pSelf = static_cast<CPhysicBalls *>(pUserData);
 
 	float Size = pResult->NumArguments() > 0 ? pResult->GetFloat(0) : PhysicBallSize;
+	const int Count = std::clamp(g_Config.m_BcPhysicBallsSpawnCount, 1, 50);
 
-	pSelf->NewBallCursor(Size);
+	for(int i = 0; i < Count; i++)
+		pSelf->NewBallCursor(Size);
 }
 
 void CPhysicBalls::ConRemovePhysicBallsAtCursor(IConsole::IResult *pResult, void *pUserData)
@@ -113,7 +117,7 @@ void CPhysicBalls::ConRemovePhysicBallsAtCursor(IConsole::IResult *pResult, void
 		return;
 
 	const float Radius = pResult->NumArguments() > 0 ? pResult->GetFloat(0) : 20.0f;
-	const vec2 CursorPos = pSelf->GameClient()->BcGetCursorWorldPos();
+	const vec2 CursorPos = pSelf->GetCursorWorldPos();
 
 	for(const CBall &Ball : pSelf->m_vBalls)
 	{
@@ -128,6 +132,28 @@ void CPhysicBalls::ConResetPhysicBalls(IConsole::IResult *pResult, void *pUserDa
 {
 	CPhysicBalls *pSelf = static_cast<CPhysicBalls *>(pUserData);
 	pSelf->Reset();
+}
+
+vec2 CPhysicBalls::GetCursorWorldPos() const
+{
+	if(GameClient()->m_Snap.m_SpecInfo.m_Active)
+		return GameClient()->m_Camera.m_Center;
+
+	vec2 Target = GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy];
+
+	vec2 TargetCameraOffset(0, 0);
+	float l = length(Target);
+
+	if(l > 0.0001f)
+	{
+		float OffsetAmount = std::max(l - GameClient()->m_Snap.m_SpecInfo.m_Deadzone, 0.0f) * (GameClient()->m_Snap.m_SpecInfo.m_FollowFactor / 100.0f);
+		TargetCameraOffset = normalize(Target) * OffsetAmount;
+	}
+
+	vec2 Position = GameClient()->m_CursorInfo.Position();
+
+	const float Zoom = GameClient()->m_Camera.m_Zoom;
+	return Position + (Target - TargetCameraOffset) * Zoom + TargetCameraOffset;
 }
 
 vec2 CPhysicBalls::PlayerPos(float BallSize) const
@@ -159,11 +185,12 @@ void CPhysicBalls::RenderBalls()
 		return;
 
 	const CSkin *pSkin = GameClient()->m_Skins.Find(g_Config.m_BcPhysicBallsSkin);
-	if(!pSkin)
-		return;
 
-	float ScreenX0, ScreenY0, ScreenX1, ScreenY1;
-	Graphics()->GetScreen(&ScreenX0, &ScreenY0, &ScreenX1, &ScreenY1);
+	const CScreenRect ScreenRect = Graphics()->GetScreen();
+	const float ScreenX0 = std::min(ScreenRect.m_TopLeft.x, ScreenRect.m_BottomRight.x);
+	const float ScreenX1 = std::max(ScreenRect.m_TopLeft.x, ScreenRect.m_BottomRight.x);
+	const float ScreenY0 = std::min(ScreenRect.m_TopLeft.y, ScreenRect.m_BottomRight.y);
+	const float ScreenY1 = std::max(ScreenRect.m_TopLeft.y, ScreenRect.m_BottomRight.y);
 
 	m_vpVisibleBalls.clear();
 	for(const CBall &Ball : m_vBalls)
@@ -186,7 +213,7 @@ void CPhysicBalls::RenderBalls()
 		for(const CBall *pBall : m_vpVisibleBalls)
 		{
 			Graphics()->QuadsSetRotation(pBall->m_Rotation);
-			IEngineGraphics::CQuadItem Quad{pBall->m_Pos.x, pBall->m_Pos.y, pBall->m_Size, pBall->m_Size};
+			IGraphics::CQuadItem Quad{pBall->m_Pos.x, pBall->m_Pos.y, pBall->m_Size, pBall->m_Size};
 			Graphics()->QuadsDraw(&Quad, 1);
 		}
 		Graphics()->QuadsEnd();
@@ -201,7 +228,7 @@ void CPhysicBalls::UpdateStepState()
 			    (float)GameClient()->m_aClients[LocalId].m_Predicted.m_Tuning.m_Gravity :
 			    (float)GameClient()->m_aTuning[g_Config.m_ClDummy].m_Gravity;
 
-	m_CursorWorldPos = GameClient()->BcGetCursorWorldPos();
+	m_CursorWorldPos = GetCursorWorldPos();
 	m_FireHeld = HoldingFire();
 	m_FirePressed = PressedFire();
 	m_Weapon = GameClient()->m_Snap.m_SpecInfo.m_Active ? WEAPON_GUN : CurrentWeapon();
@@ -475,7 +502,6 @@ void CPhysicBalls::DoMapCollisions(CBall *pBall, float Dt, float Elasticity) con
 		{
 			int Hits = 0;
 
-			// Y axis
 			if(TestBox(vec2(Pos.x, NextPos.y), BallRadius))
 			{
 				if(Vel.y > 0)
@@ -485,7 +511,6 @@ void CPhysicBalls::DoMapCollisions(CBall *pBall, float Dt, float Elasticity) con
 				Hits++;
 			}
 
-			// X axis
 			if(TestBox(vec2(NextPos.x, Pos.y), BallRadius))
 			{
 				NextPos.x = Pos.x;
@@ -493,7 +518,6 @@ void CPhysicBalls::DoMapCollisions(CBall *pBall, float Dt, float Elasticity) con
 				Hits++;
 			}
 
-			// Corner hit
 			if(Hits == 0)
 			{
 				if(Vel.y > 0)
@@ -630,9 +654,6 @@ void CPhysicBalls::UpdateSleepState(CBall *pBall, float Dt) const
 
 void CPhysicBalls::DoBallPhysics(CBall *pBall, float Dt, float Elasticity)
 {
-	const int CurrentIndex = Collision()->GetMapIndex(pBall->m_Pos);
-	pBall->m_TuneZone = Collision()->IsTune(CurrentIndex);
-
 	const float DtTicks = Dt * (float)SERVER_TICK_SPEED;
 
 	DoWeaponFireEffects(pBall, DtTicks);
@@ -697,7 +718,6 @@ void CPhysicBalls::Update(float Dt)
 			UpdateSleepState(&Ball, Dt);
 		}
 
-		// Written inverted so that a non finite position is dropped as well.
 		if(!(Ball.m_Pos.x > -PhysicBallKillMargin && Ball.m_Pos.x < MaxX &&
 			   Ball.m_Pos.y > -PhysicBallKillMargin && Ball.m_Pos.y < MaxY))
 			Ball.m_Dead = true;
@@ -711,7 +731,7 @@ void CPhysicBalls::OnRender()
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 		return;
 
-	const int64_t Now = time();
+	const int64_t Now = time_get();
 	if(m_LastPhysicsTime == 0)
 	{
 		m_LastPhysicsTime = Now;
@@ -721,7 +741,7 @@ void CPhysicBalls::OnRender()
 		const int64_t Delta = Now - m_LastPhysicsTime;
 		m_LastPhysicsTime = Now;
 
-		const float Dt = std::clamp((float)Delta / (float)time_freq(), 0.0f, 1.0f / 20.0f); // max 50 ms
+		const float Dt = std::clamp((float)Delta / (float)time_freq(), 0.0f, 1.0f / 20.0f);
 
 		Update(Dt);
 	}
@@ -731,6 +751,7 @@ void CPhysicBalls::OnRender()
 
 bool CPhysicBalls::GetNearestAirPos(vec2 Pos, vec2 PrevPos, vec2 *pOutPos, float BallSize) const
 {
+	(void)PrevPos;
 	const float Radius = BallSize * PhysicBallRadiusScale;
 
 	if(!TestBox(Pos, Radius))

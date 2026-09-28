@@ -1,6 +1,4 @@
-// Copyright © 2026 BestProject Team
-// Minimal embedded 5x7 bitmap font for the Linux updater's SDL2 UI.
-// No SDL2_ttf / external font file dependency (see design doc).
+/* Copyright © 2026 BestProject Team */
 #ifndef TOOLS_BESTCLIENT_UPDATER_LINUX_FONT_H
 #define TOOLS_BESTCLIENT_UPDATER_LINUX_FONT_H
 
@@ -14,10 +12,9 @@ namespace BcFont
 struct SGlyph
 {
 	char m_Char;
-	unsigned char m_aCol[5]; // one byte per column, bit 0 = top row .. bit 6 = bottom row
+	unsigned char m_aCol[5];
 };
 
-// clang-format off
 static const SGlyph g_aGlyphs[] = {
 	{' ', {0x00, 0x00, 0x00, 0x00, 0x00}},
 	{'.', {0x00, 0x60, 0x60, 0x00, 0x00}},
@@ -85,7 +82,6 @@ static const SGlyph g_aGlyphs[] = {
 	{'y', {0x0C, 0x50, 0x50, 0x50, 0x3C}},
 	{'z', {0x44, 0x64, 0x54, 0x4C, 0x44}},
 };
-// clang-format on
 
 constexpr int GLYPH_COLS = 5;
 constexpr int GLYPH_ROWS = 7;
@@ -98,7 +94,7 @@ inline const unsigned char *FindGlyph(char Char)
 		if(Glyph.m_Char == Char)
 			return Glyph.m_aCol;
 	}
-	return g_aGlyphs[0].m_aCol; // space
+	return g_aGlyphs[0].m_aCol;
 }
 
 inline int TextWidth(const char *pText, int Scale)
@@ -131,6 +127,6 @@ inline void DrawText(SDL_Renderer *pRenderer, int X, int Y, int Scale, const cha
 	}
 }
 
-} // namespace BcFont
+}
 
 #endif

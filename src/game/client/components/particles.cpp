@@ -2,6 +2,7 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "particles.h"
 
+#include <base/dbg.h>
 #include <base/math.h>
 #include <base/time.h>
 
@@ -14,7 +15,7 @@
 
 CParticles::CParticles()
 {
-	OnReset();
+	CParticles::OnReset();
 	m_RenderTrail.m_pParts = this;
 	m_RenderTrailExtra.m_pParts = this;
 	m_RenderExplosions.m_pParts = this;
@@ -41,19 +42,14 @@ void CParticles::OnReset()
 
 void CParticles::Add(int Group, CParticle *pPart, float TimePassed)
 {
+	// bestclient
 	if(GameClient()->OptimizerDisableParticles())
 		return;
+	// bestclient
 
-	if(Client()->State() == IClient::STATE_DEMOPLAYBACK)
+	if(GameClient()->IsWorldPaused() || GameClient()->IsDemoPlaybackPaused())
 	{
-		const IDemoPlayer::CInfo *pInfo = DemoPlayer()->BaseInfo();
-		if(pInfo->m_Paused)
-			return;
-	}
-	else
-	{
-		if(GameClient()->m_Snap.m_pGameInfoObj && GameClient()->m_Snap.m_pGameInfoObj->m_GameStateFlags & GAMESTATEFLAG_PAUSED)
-			return;
+		return;
 	}
 
 	if(m_FirstFree == -1)
@@ -153,26 +149,16 @@ void CParticles::OnRender()
 		return;
 
 	set_new_tick();
-	int64_t t = time();
+	const int64_t Now = time();
+	// bestclient
 	if(GameClient()->OptimizerDisableParticles())
 	{
-		m_LastRenderTime = t;
+		m_LastRenderTime = Now;
 		return;
 	}
-
-	if(Client()->State() == IClient::STATE_DEMOPLAYBACK)
-	{
-		const IDemoPlayer::CInfo *pInfo = DemoPlayer()->BaseInfo();
-		if(!pInfo->m_Paused)
-			Update((float)((t - m_LastRenderTime) / (double)time_freq()) * pInfo->m_Speed);
-	}
-	else
-	{
-		if(GameClient()->m_Snap.m_pGameInfoObj && !(GameClient()->m_Snap.m_pGameInfoObj->m_GameStateFlags & GAMESTATEFLAG_PAUSED))
-			Update((float)((t - m_LastRenderTime) / (double)time_freq()));
-	}
-
-	m_LastRenderTime = t;
+	// bestclient
+	Update((float)((Now - m_LastRenderTime) / (double)time_freq()) * GameClient()->GetAnimationPlaybackSpeed());
+	m_LastRenderTime = Now;
 }
 
 void CParticles::OnInit()
@@ -200,10 +186,9 @@ void CParticles::OnInit()
 	Graphics()->QuadContainerUpload(m_ExtraParticleQuadContainerIndex);
 }
 
-bool CParticles::ParticleIsVisibleOnScreen(const vec2 &CurPos, float CurSize)
+bool CParticles::ParticleIsVisibleOnScreen(const vec2 &CurPos, float CurSize) const
 {
-	float ScreenX0, ScreenY0, ScreenX1, ScreenY1;
-	Graphics()->GetScreen(&ScreenX0, &ScreenY0, &ScreenX1, &ScreenY1);
+	CScreenRect ScreenRect = Graphics()->GetScreen();
 
 	// for simplicity assume the worst case rotation, that increases the bounding box around the particle by its diagonal
 	const float SqrtOf2 = std::sqrt(2);
@@ -211,14 +196,17 @@ bool CParticles::ParticleIsVisibleOnScreen(const vec2 &CurPos, float CurSize)
 
 	// always uses the mid of the particle
 	float SizeHalf = CurSize / 2;
+	ScreenRect.Expand(SizeHalf);
 
-	return CurPos.x + SizeHalf >= ScreenX0 && CurPos.x - SizeHalf <= ScreenX1 && CurPos.y + SizeHalf >= ScreenY0 && CurPos.y - SizeHalf <= ScreenY1;
+	return ScreenRect.Inside(CurPos);
 }
 
 void CParticles::RenderGroup(int Group)
 {
+	// bestclient
 	if(GameClient()->OptimizerDisableParticles())
 		return;
+	// bestclient
 
 	IGraphics::CTextureHandle *aParticles = GameClient()->m_ParticlesSkin.m_aSpriteParticles;
 	int FirstParticleOffset = SPRITE_PART_SLICE;
@@ -277,8 +265,8 @@ void CParticles::RenderGroup(int Group)
 				Alpha = mix(m_aParticles[i].m_StartAlpha, m_aParticles[i].m_EndAlpha, a);
 			}
 
-			// the current position, respecting the size, is inside the viewport and FPS fog, render it, else ignore
-			if(ParticleIsVisibleOnScreen(p, Size) && GameClient()->OptimizerAllowRenderPos(p))
+			// the current position, respecting the size, is inside the viewport, render it, else ignore
+			if(ParticleIsVisibleOnScreen(p, Size))
 			{
 				if((size_t)CurParticleRenderCount == GRAPHICS_MAX_PARTICLES_RENDER_COUNT || LastColor.r != m_aParticles[i].m_Color.r || LastColor.g != m_aParticles[i].m_Color.g || LastColor.b != m_aParticles[i].m_Color.b || LastColor.a != Alpha || LastQuadOffset != QuadOffset)
 				{
@@ -322,7 +310,6 @@ void CParticles::RenderGroup(int Group)
 	{
 		int i = m_aFirstPart[Group];
 
-		Graphics()->BlendNormal();
 		Graphics()->WrapClamp();
 
 		while(i != -1)
@@ -336,8 +323,8 @@ void CParticles::RenderGroup(int Group)
 				Alpha = mix(m_aParticles[i].m_StartAlpha, m_aParticles[i].m_EndAlpha, a);
 			}
 
-			// the current position, respecting the size, is inside the viewport and FPS fog, render it, else ignore
-			if(ParticleIsVisibleOnScreen(p, Size) && GameClient()->OptimizerAllowRenderPos(p))
+			// the current position, respecting the size, is inside the viewport, render it, else ignore
+			if(ParticleIsVisibleOnScreen(p, Size))
 			{
 				Graphics()->TextureSet(aParticles[m_aParticles[i].m_Spr - FirstParticleOffset]);
 				Graphics()->QuadsBegin();
@@ -358,6 +345,5 @@ void CParticles::RenderGroup(int Group)
 			i = m_aParticles[i].m_NextPart;
 		}
 		Graphics()->WrapNormal();
-		Graphics()->BlendNormal();
 	}
 }

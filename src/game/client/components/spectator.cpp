@@ -9,28 +9,14 @@
 #include <engine/shared/config.h>
 #include <engine/textrender.h>
 
-#include <generated/client_data.h>
 #include <generated/protocol.h>
 
 #include <game/client/animstate.h>
+#include <game/client/components/bestclient/bestclient.h> // bestclient
 #include <game/client/gameclient.h>
 #include <game/localization.h>
 
 #include <limits>
-
-namespace
-{
-void RenderBestClientIcon(IGraphics *pGraphics, const CUIRect &Rect, bool Developer = false)
-{
-	pGraphics->TextureSet(g_pData->m_aImages[Developer ? IMAGE_BCDEVICON : IMAGE_BCICON].m_Id);
-	pGraphics->QuadsBegin();
-	pGraphics->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
-	pGraphics->QuadsSetSubset(0.0f, 0.0f, 1.0f, 1.0f);
-	const IGraphics::CQuadItem Quad(Rect.x, Rect.y, Rect.w, Rect.h);
-	pGraphics->QuadsDrawTL(&Quad, 1);
-	pGraphics->QuadsEnd();
-}
-}
 
 bool CSpectator::CanChangeSpectatorId()
 {
@@ -157,7 +143,7 @@ void CSpectator::ConMultiView(IConsole::IResult *pResult, void *pUserData)
 CSpectator::CSpectator()
 {
 	m_SelectorMouse = vec2(0.0f, 0.0f);
-	OnReset();
+	CSpectator::OnReset();
 }
 
 void CSpectator::OnConsoleInit()
@@ -296,13 +282,23 @@ void CSpectator::OnRender()
 		++TotalPlayers;
 	}
 
-	if(TotalPlayers > 64)
+	if(TotalPlayers > 96)
 	{
-		FontSize = 12.0f;
+		FontSize = 15.0f;
 		LineHeight = 15.0f;
 		TeeSizeMod = 0.3f;
 		PerLine = 32;
 		RoundRadius = 5.0f;
+		BoxMove = 3.0f;
+		BoxOffset = 6.0f;
+	}
+	else if(TotalPlayers > 64)
+	{
+		FontSize = 16.0f;
+		LineHeight = 19.0f;
+		TeeSizeMod = 0.45f;
+		PerLine = 24;
+		RoundRadius = 6.0f;
 		BoxMove = 3.0f;
 		BoxOffset = 6.0f;
 	}
@@ -347,7 +343,7 @@ void CSpectator::OnRender()
 		}
 	}
 
-	Graphics()->MapScreen(0, 0, Width, Height);
+	Graphics()->MapScreenToSize(Width, Height);
 
 	SpectatorRect.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.3f), IGraphics::CORNER_ALL, 20.0f);
 
@@ -533,12 +529,14 @@ void CSpectator::OnRender()
 			TextRender()->TextColor(1.0f, 1.0f, 1.0f, PlayerSelected ? 1.0f : 0.5f);
 			TeeAlpha = 1.0f;
 		}
+		// bestclient
 		const bool ShowBestClientIndicator = g_Config.m_BcClientIndicatorInScoreboard &&
 						     pInfo->m_ClientId >= 0 &&
 						     GameClient()->m_ClientIndicator.IsPlayerBestClient(pInfo->m_ClientId);
 		const float BestClientIconSize = FontSize * (0.8f + 0.3f * g_Config.m_BcClientIndicatorInSoreboardSize / 100.0f);
 		const float BestClientIconSpacing = 4.0f;
 		const float BestClientIconReserve = ShowBestClientIndicator ? BestClientIconSize + BestClientIconSpacing : 0.0f;
+		// bestclient
 
 		CTextCursor NameCursor;
 		NameCursor.SetPosition(vec2(Width / 2.0f + x + 50.0f + BestClientIconReserve, Height / 2.0f + y + BoxMove + (LineHeight - FontSize) / 2.f));
@@ -546,6 +544,7 @@ void CSpectator::OnRender()
 		NameCursor.m_Flags |= TEXTFLAG_ELLIPSIS_AT_END;
 		NameCursor.m_LineWidth = 180.0f;
 
+		// bestclient
 		if(ShowBestClientIndicator)
 		{
 			const CUIRect IconRect = {
@@ -553,8 +552,11 @@ void CSpectator::OnRender()
 				Height / 2.0f + y + BoxMove + (LineHeight - BestClientIconSize) / 2.0f,
 				BestClientIconSize,
 				BestClientIconSize};
-			RenderBestClientIcon(Graphics(), IconRect, GameClient()->m_ClientIndicator.IsPlayerDeveloper(pInfo->m_ClientId));
+			BestClientRenderIndicatorIcon(Graphics(), IconRect,
+				GameClient()->m_ClientIndicator.IsPlayerDeveloper(pInfo->m_ClientId),
+				GameClient()->m_ClientIndicator.IsPlayerFakeVersion(pInfo->m_ClientId));
 		}
+		// bestclient
 
 		if(g_Config.m_ClShowIds)
 		{
@@ -589,7 +591,6 @@ void CSpectator::OnRender()
 		if(GameClient()->m_Snap.m_pGameInfoObj && (GameClient()->m_Snap.m_pGameInfoObj->m_GameFlags & GAMEFLAG_FLAGS) &&
 			GameClient()->m_Snap.m_pGameDataObj && (GameClient()->m_Snap.m_pGameDataObj->m_FlagCarrierRed == GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId || GameClient()->m_Snap.m_pGameDataObj->m_FlagCarrierBlue == GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId))
 		{
-			Graphics()->BlendNormal();
 			if(GameClient()->m_Snap.m_pGameDataObj->m_FlagCarrierBlue == GameClient()->m_Snap.m_apInfoByDDTeamName[i]->m_ClientId)
 				Graphics()->TextureSet(GameClient()->m_GameSkin.m_SpriteFlagBlue);
 			else

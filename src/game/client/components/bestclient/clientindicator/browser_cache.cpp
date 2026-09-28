@@ -1,20 +1,23 @@
 /* Copyright © 2026 BestProject Team */
 #include "browser_cache.h"
+#include "version_label.h"
 
 #include <base/net.h>
-#include <base/system.h>
+#include <base/str.h>
 
 #include <engine/external/json-parser/json.h>
 
+#include <cstring>
+
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 
 namespace
 {
 struct CParsedPlayerInfo
 {
 	bool m_Developer = false;
+	bool m_Fake = false;
 	std::string m_Version;
 };
 
@@ -30,12 +33,6 @@ static bool GetBoolField(const json_value &Json, const char *pField)
 {
 	const json_value &Field = Json[pField];
 	return Field.type == json_boolean && Field.u.boolean != 0;
-}
-
-static const char *GetOptionalStringField(const json_value &Json, const char *pField)
-{
-	const json_value &Field = Json[pField];
-	return Field.type == json_string ? Field.u.string.ptr : nullptr;
 }
 
 static bool NormalizeServerAddress(const char *pAddress, char *pBuffer, int BufferSize)
@@ -67,7 +64,7 @@ static bool NormalizeServerAddress(const char *pAddress, char *pBuffer, int Buff
 	return true;
 }
 
-static void AddPlayer(TParsedPlayers &Map, const char *pServerAddress, const char *pName, bool Developer = false, const char *pVersion = nullptr)
+static void AddPlayer(TParsedPlayers &Map, const char *pServerAddress, const char *pName, bool Developer = false, bool Fake = false, const char *pVersion = nullptr)
 {
 	if(!pServerAddress || !pName || pServerAddress[0] == '\0' || pName[0] == '\0')
 		return;
@@ -78,6 +75,7 @@ static void AddPlayer(TParsedPlayers &Map, const char *pServerAddress, const cha
 
 	CParsedPlayerInfo &Info = Map[aNormalizedAddress][pName];
 	Info.m_Developer = Info.m_Developer || Developer;
+	Info.m_Fake = Info.m_Fake || Fake;
 	if(pVersion && pVersion[0] != '\0' && Info.m_Version.empty())
 		Info.m_Version = pVersion;
 }
@@ -87,16 +85,17 @@ static void ParsePlayerObject(TParsedPlayers &Map, const char *pServerAddress, c
 	if(Player.type != json_object)
 		return;
 	const bool Developer = GetBoolField(Player, "developer");
-	const char *pVersion = GetOptionalStringField(Player, "version");
+	const bool Fake = GetBoolField(Player, "fake");
+	const char *pVersion = GetStringField(Player, "version");
 
 	if(const char *pName = GetStringField(Player, "name"))
 	{
-		AddPlayer(Map, pServerAddress, pName, Developer, pVersion);
+		AddPlayer(Map, pServerAddress, pName, Developer, Fake, pVersion);
 		return;
 	}
 	if(const char *pName = GetStringField(Player, "player_name"))
 	{
-		AddPlayer(Map, pServerAddress, pName, Developer, pVersion);
+		AddPlayer(Map, pServerAddress, pName, Developer, Fake, pVersion);
 		return;
 	}
 
@@ -106,7 +105,7 @@ static void ParsePlayerObject(TParsedPlayers &Map, const char *pServerAddress, c
 		if(Entry.value->type == json_object)
 		{
 			if(const char *pName = GetStringField(*Entry.value, "name"))
-				AddPlayer(Map, pServerAddress, pName, GetBoolField(*Entry.value, "developer"), GetOptionalStringField(*Entry.value, "version"));
+				AddPlayer(Map, pServerAddress, pName, GetBoolField(*Entry.value, "developer"), GetBoolField(*Entry.value, "fake"), GetStringField(*Entry.value, "version"));
 		}
 		else if(Entry.value->type == json_string)
 		{
@@ -184,27 +183,31 @@ bool CBrowserCache::Load(const json_value &Json)
 	m_vPlayers.clear();
 	m_PlayerVersionsByServer.clear();
 	m_DeveloperByServer.clear();
+	m_FakeByServer.clear();
 	for(const auto &ServerEntry : Parsed)
 	{
 		for(const auto &Name : ServerEntry.second)
 		{
-			IServerBrowser::CBestClientPlayerEntry Entry;
-			mem_zero(&Entry, sizeof(Entry));
+			IServerBrowser::CBestClientPlayerEntry Entry{};
 			str_copy(Entry.m_aServerAddress, ServerEntry.first.c_str(), sizeof(Entry.m_aServerAddress));
 			str_copy(Entry.m_aName, Name.first.c_str(), sizeof(Entry.m_aName));
 			Entry.m_Developer = Name.second.m_Developer;
-			m_PlayerVersionsByServer[ServerEntry.first][Name.first] = Name.second.m_Version.empty() ? "under" : Name.second.m_Version;
+			Entry.m_Fake = Name.second.m_Fake;
+			m_PlayerVersionsByServer[ServerEntry.first][Name.first] = Name.second.m_Version.empty() ? "under" : BestClientStripVersionProofStr(Name.second.m_Version);
 			m_DeveloperByServer[ServerEntry.first][Name.first] = Name.second.m_Developer;
+			m_FakeByServer[ServerEntry.first][Name.first] = Name.second.m_Fake;
 			m_vPlayers.push_back(Entry);
 		}
 	}
 	return true;
 }
 
-bool CBrowserCache::HasPlayer(const char *pServerAddress, const char *pName, bool *pDeveloper) const
+bool CBrowserCache::HasPlayer(const char *pServerAddress, const char *pName, bool *pDeveloper, bool *pFake) const
 {
 	if(pDeveloper)
 		*pDeveloper = false;
+	if(pFake)
+		*pFake = false;
 	if(!pServerAddress || !pName || pServerAddress[0] == '\0' || pName[0] == '\0')
 		return false;
 
@@ -222,6 +225,16 @@ bool CBrowserCache::HasPlayer(const char *pServerAddress, const char *pName, boo
 
 	if(pDeveloper)
 		*pDeveloper = PlayerIt->second;
+	if(pFake)
+	{
+		const auto FakeServerIt = m_FakeByServer.find(aNormalizedAddress);
+		if(FakeServerIt != m_FakeByServer.end())
+		{
+			const auto FakePlayerIt = FakeServerIt->second.find(pName);
+			if(FakePlayerIt != FakeServerIt->second.end())
+				*pFake = FakePlayerIt->second;
+		}
+	}
 	return true;
 }
 

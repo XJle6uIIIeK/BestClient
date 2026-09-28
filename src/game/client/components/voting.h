@@ -47,8 +47,8 @@ public:
 	void OnConsoleInit() override;
 	void OnMessage(int MsgType, void *pRawMsg) override;
 
-	void Render(bool ForcePreview = false);
-	CUIRect GetHudRect(float HudWidth, float HudHeight, bool ForcePreview = false) const;
+	void Render(bool ForcePreview = false); // bestclient
+	CUIRect GetHudRect(float HudWidth, float HudHeight, bool ForcePreview = false) const; // bestclient
 
 	void CallvoteSpectate(int ClientId, const char *pReason, bool ForceVote = false);
 	void CallvoteKick(int ClientId, const char *pReason, bool ForceVote = false);

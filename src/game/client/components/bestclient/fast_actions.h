@@ -2,8 +2,6 @@
 #ifndef GAME_CLIENT_COMPONENTS_BESTCLIENT_FAST_ACTIONS_H
 #define GAME_CLIENT_COMPONENTS_BESTCLIENT_FAST_ACTIONS_H
 
-#include <base/str.h>
-
 #include <engine/console.h>
 
 #include <game/client/component.h>
@@ -25,8 +23,8 @@ class CFastActions : public CComponent
 
 	bool m_Active = false;
 
-	int m_SelectedBind;
-	int m_DisplayBind;
+	int m_SelectedBind = -1;
+	int m_DisplayBind = -1;
 
 	static void ConOpenFa(IConsole::IResult *pResult, void *pUserData);
 	static void ConAddFaLegacy(IConsole::IResult *pResult, void *pUserData);
@@ -54,11 +52,10 @@ public:
 	void OnRender() override;
 	void OnConsoleInit() override;
 	void OnRelease() override;
-	bool OnCursorMove(float x, float y, IInput::ECursorType CursorType) override;
 	bool OnInput(const IInput::CEvent &Event) override;
 
-	void AddBind(const char *Name, const char *Command);
-	void RemoveBind(const char *Name, const char *Command);
+	void AddBind(const char *pName, const char *pCommand);
+	void RemoveBind(const char *pName, const char *pCommand);
 	void RemoveBind(int Index);
 	void RemoveAllBinds();
 

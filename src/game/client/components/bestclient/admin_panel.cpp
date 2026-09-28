@@ -2,13 +2,13 @@
 #include "admin_panel.h"
 
 #include <base/math.h>
-#include <base/system.h>
+#include <base/str.h>
+#include <base/time.h>
 
 #include <engine/graphics.h>
 #include <engine/shared/config.h>
 #include <engine/font_icons.h>
 #include <engine/shared/localization.h>
-#include <engine/storage.h>
 #include <engine/textrender.h>
 
 #include <game/client/animstate.h>
@@ -118,6 +118,18 @@ CAdminPanel::CAdminPanel()
 void CAdminPanel::OnConsoleInit()
 {
 	Console()->Register("toggle_admin_panel", "", CFGFLAG_CLIENT, ConToggleAdminPanel, this, "Toggle admin panel");
+	InitEmptyTexts();
+}
+
+void CAdminPanel::InitEmptyTexts()
+{
+	m_RconUserInput.SetEmptyText(Localize("Username"));
+	m_RconPassInput.SetEmptyText(Localize("Password"));
+	m_RconPassInput.SetHidden(true);
+	m_TuningSearchInput.SetEmptyText(Localize("Search tunings"));
+	m_TuningValueInput.SetEmptyText(Localize("Value"));
+	m_ActionReasonInput.SetEmptyText(Localize("Reason"));
+	m_ActionDurationInput.SetEmptyText(Localize("Duration"));
 }
 
 void CAdminPanel::OnReset()
@@ -143,14 +155,6 @@ void CAdminPanel::OnReset()
 	m_TuningValueInput.Clear();
 	m_ActionReasonInput.Clear();
 	m_ActionDurationInput.Clear();
-
-	m_RconUserInput.SetEmptyText(Localize("Username"));
-	m_RconPassInput.SetEmptyText(Localize("Password"));
-	m_RconPassInput.SetHidden(true);
-	m_TuningSearchInput.SetEmptyText(Localize("Search tunings"));
-	m_TuningValueInput.SetEmptyText(Localize("Value"));
-	m_ActionReasonInput.SetEmptyText(Localize("Reason"));
-	m_ActionDurationInput.SetEmptyText(Localize("Duration"));
 }
 
 void CAdminPanel::OnRelease()
@@ -244,8 +248,6 @@ bool CAdminPanel::HasCommand(const char *pCommand, int FallbackAuth) const
 	{
 		if(Console()->GetCommandInfo(pCommand, CFGFLAG_SERVER, true) != nullptr)
 			return true;
-		// Catalog still downloading — allow actions immediately (rcon accepts typed cmds anyway).
-		// Do NOT use GotRconCommandsPercentage(): it returns -1 when idle, and -1 < 1 is always true.
 		return Client()->ReceivingRconCommands();
 	}
 	return LocalAuthLevel() >= FallbackAuth;
@@ -322,22 +324,22 @@ bool CAdminPanel::TryBuildActionCommand(char *pBuffer, int BufferSize) const
 	const char *pDuration = m_ActionDurationInput.GetString();
 	if(m_ActionPopupType == EAction::MUTE)
 	{
-		str_format(pBuffer, BufferSize, "muteid %d %s %s", m_ActionPopupClientId, m_ActionDurationInput.IsEmpty() ? "600" : pDuration, m_ActionReasonInput.IsEmpty() ? "Muted by admin panel" : pReason);
+		str_format(pBuffer, BufferSize, "muteid %d %s %s", m_ActionPopupClientId, m_ActionDurationInput.IsEmpty() ? "600" : pDuration, m_ActionReasonInput.IsEmpty() ? Localize("Muted by admin panel") : pReason);
 		return true;
 	}
 	if(m_ActionPopupType == EAction::BAN)
 	{
-		str_format(pBuffer, BufferSize, "ban %d %s %s", m_ActionPopupClientId, m_ActionDurationInput.IsEmpty() ? "10" : pDuration, m_ActionReasonInput.IsEmpty() ? "Banned by admin panel" : pReason);
+		str_format(pBuffer, BufferSize, "ban %d %s %s", m_ActionPopupClientId, m_ActionDurationInput.IsEmpty() ? "10" : pDuration, m_ActionReasonInput.IsEmpty() ? Localize("Banned by admin panel") : pReason);
 		return true;
 	}
 	if(m_ActionPopupType == EAction::KICK)
 	{
-		str_format(pBuffer, BufferSize, "kick %d %s", m_ActionPopupClientId, m_ActionReasonInput.IsEmpty() ? "Kicked by admin panel" : pReason);
+		str_format(pBuffer, BufferSize, "kick %d %s", m_ActionPopupClientId, m_ActionReasonInput.IsEmpty() ? Localize("Kicked by admin panel") : pReason);
 		return true;
 	}
 	if(m_ActionPopupType == EAction::RESPAWN)
 	{
-		str_format(pBuffer, BufferSize, "respawn %d %s", m_ActionPopupClientId, m_ActionReasonInput.IsEmpty() ? "Respawned by admin panel" : pReason);
+		str_format(pBuffer, BufferSize, "respawn %d %s", m_ActionPopupClientId, m_ActionReasonInput.IsEmpty() ? Localize("Respawned by admin panel") : pReason);
 		return true;
 	}
 	if(m_ActionPopupType == EAction::FORCE_PAUSE)
@@ -456,13 +458,11 @@ void CAdminPanel::RenderPlayerActions(CUIRect View)
 	View.HSplitTop(ACTION_SPACING, nullptr, &View);
 
 	static CScrollRegion s_ActionScroll;
-	static vec2 s_ActionScrollOffset(0.0f, 0.0f);
 	CScrollRegionParams ScrollParams;
 	ScrollParams.m_ScrollUnit = 30.0f;
-	ScrollParams.m_ScrollbarWidth = 14.0f;
+	ScrollParams.m_ScrollbarThickness = 14.0f;
 	ScrollParams.m_ScrollbarMargin = 3.0f;
-	s_ActionScroll.Begin(&View, &s_ActionScrollOffset, &ScrollParams);
-	View.y += s_ActionScrollOffset.y;
+	s_ActionScroll.Begin(&View, &ScrollParams);
 
 	auto DoActionPopupButton = [&](CButtonContainer &Button, const SActionSpec &Spec, CUIRect ButtonRect) {
 		const bool Enabled = IsActionEnabled(Spec, m_SelectedClientId);
@@ -543,14 +543,14 @@ void CAdminPanel::RenderPlayerActions(CUIRect View)
 				char aCmd[128] = "";
 				const int LocalId = GameClient()->m_Snap.m_LocalClientId;
 				if(Action.m_pButton == &m_VoteMuteButton)
-					str_format(aCmd, sizeof(aCmd), "vote_muteid %d 600 Muted by admin panel", m_SelectedClientId);
+					str_format(aCmd, sizeof(aCmd), "vote_muteid %d 600 %s", m_SelectedClientId, Localize("Muted by admin panel"));
 				else if(Action.m_pButton == &m_TeleportButton && LocalId >= 0)
 					str_format(aCmd, sizeof(aCmd), "tele %d %d", m_SelectedClientId, LocalId);
 				else if(Action.m_pButton == &m_TeleportToPlayerButton)
 				{
-					// Prefer predicted pos; fall back to snap so we still tele when prediction is cold.
 					vec2 TargetPos = GameClient()->m_aClients[m_SelectedClientId].m_Predicted.m_Pos;
-					if(GameClient()->m_Snap.m_aCharacters[m_SelectedClientId].m_Active)
+					if(GameClient()->m_PredictedWorld.GetCharacterById(m_SelectedClientId) == nullptr &&
+						GameClient()->m_Snap.m_aCharacters[m_SelectedClientId].m_Active)
 					{
 						TargetPos.x = GameClient()->m_Snap.m_aCharacters[m_SelectedClientId].m_Cur.m_X;
 						TargetPos.y = GameClient()->m_Snap.m_aCharacters[m_SelectedClientId].m_Cur.m_Y;
@@ -617,7 +617,7 @@ void CAdminPanel::RenderPlayerInfo(CUIRect View, int ClientId)
 		Ui()->DoLabel(&Label, pLabel, 10.0f, TEXTALIGN_ML);
 		TextRender()->TextColor(ColorRGBA(0.95f, 0.95f, 0.95f, 1.0f));
 		SLabelProperties ValueProps;
-		ValueProps.m_MaxWidth = maximum(1.0f, Value.w);
+		ValueProps.m_MaxWidth = std::max(1.0f, Value.w);
 		ValueProps.m_EllipsisAtEnd = true;
 		Ui()->DoLabel(&Value, pValue, 12.0f, TEXTALIGN_ML, ValueProps);
 		TextRender()->TextColor(TextRender()->DefaultTextColor());
@@ -877,7 +877,7 @@ void CAdminPanel::RenderTunings(CUIRect View)
 		Ui()->DoLabel(&Label, pLabel, 10.0f, TEXTALIGN_ML);
 		TextRender()->TextColor(ColorRGBA(0.95f, 0.95f, 0.95f, 1.0f));
 		SLabelProperties ValueProps;
-		ValueProps.m_MaxWidth = maximum(1.0f, Value.w);
+		ValueProps.m_MaxWidth = std::max(1.0f, Value.w);
 		ValueProps.m_EllipsisAtEnd = true;
 		Ui()->DoLabel(&Value, pValue, 12.0f, TEXTALIGN_ML, ValueProps);
 		TextRender()->TextColor(TextRender()->DefaultTextColor());
@@ -891,7 +891,6 @@ void CAdminPanel::RenderTunings(CUIRect View)
 	str_format(aCurrent, sizeof(aCurrent), "%.2f", CurrentValue);
 	RenderInfoBlock(Right, Localize("Current"), aCurrent, INFO_BLOCK_HEIGHT);
 
-	// Stretch the new-value block across leftover editor space so the panel doesn't look empty.
 	CUIRect ValueBlock, ValueLabel, ValueField;
 	ValueBlock = Right;
 	if(ValueBlock.h > ACTION_SPACING)
@@ -937,7 +936,6 @@ void CAdminPanel::RenderLogs(CUIRect View)
 	View.Margin(ACTION_BLOCK_MARGIN, &View);
 
 	static CScrollRegion s_LogScroll;
-	static vec2 s_LogScrollOffset(0.0f, 0.0f);
 
 	CUIRect Header, ClearButton;
 	View.HSplitTop(LOGIN_ROW_HEIGHT, &Header, &View);
@@ -949,26 +947,22 @@ void CAdminPanel::RenderLogs(CUIRect View)
 		m_LogStickToBottom = true;
 		m_LogScrollToBottomPending = false;
 		s_LogScroll.Reset();
-		s_LogScrollOffset = vec2(0.0f, 0.0f);
 	}
 	View.HSplitTop(6.0f, nullptr, &View);
 
 	if(m_RconLogLines.empty())
 	{
 		s_LogScroll.Reset();
-		s_LogScrollOffset = vec2(0.0f, 0.0f);
 		Ui()->DoLabel(&View, Localize("No log entries yet"), 12.0f, TEXTALIGN_ML);
 		return;
 	}
 
 	CScrollRegionParams ScrollParams;
 	ScrollParams.m_ScrollUnit = 40.0f;
-	ScrollParams.m_ScrollbarWidth = 14.0f;
+	ScrollParams.m_ScrollbarThickness = 14.0f;
 	ScrollParams.m_ScrollbarMargin = 3.0f;
 	ScrollParams.m_ClipBgColor = ColorRGBA(0.0f, 0.0f, 0.0f, 0.18f);
-	s_LogScroll.Begin(&View, &s_LogScrollOffset, &ScrollParams);
-	const float ClipH = View.h;
-	View.y += s_LogScrollOffset.y;
+	s_LogScroll.Begin(&View, &ScrollParams);
 
 	const float LineHeight = 15.0f;
 	const int NumLines = (int)m_RconLogLines.size();
@@ -999,18 +993,7 @@ void CAdminPanel::RenderLogs(CUIRect View)
 	}
 
 	s_LogScroll.End();
-
-	if(!s_LogScroll.ScrollbarShown())
-	{
-		m_LogStickToBottom = true;
-	}
-	else
-	{
-		// Match CScrollRegion::AddRect content height for the last real line (no phantom spacer).
-		const float ContentH = NumLines * LineHeight + CScrollRegion::HEIGHT_MAGIC_FIX;
-		const float MaxScroll = maximum(0.0f, ContentH - ClipH);
-		m_LogStickToBottom = (-s_LogScrollOffset.y) >= MaxScroll - 2.0f;
-	}
+	m_LogStickToBottom = s_LogScroll.AtBottom();
 }
 
 void CAdminPanel::RenderActionPopup(const CUIRect &Screen)
@@ -1020,7 +1003,6 @@ void CAdminPanel::RenderActionPopup(const CUIRect &Screen)
 
 	CUIRect Overlay = Screen;
 	Overlay.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.42f), IGraphics::CORNER_ALL, 0.0f);
-	// Steal HotItem so clicks cannot pass through to buttons under the popup.
 	static int s_ActionPopupOverlayId;
 	Ui()->DoButtonLogic(&s_ActionPopupOverlayId, -1, &Overlay, BUTTONFLAG_LEFT);
 
@@ -1043,7 +1025,7 @@ void CAdminPanel::RenderActionPopup(const CUIRect &Screen)
 		ContentH += LOGIN_ROW_HEIGHT + 8.0f;
 
 	CUIRect Popup;
-	Popup.w = minimum(460.0f, Screen.w * 0.55f);
+	Popup.w = std::min(460.0f, Screen.w * 0.55f);
 	Popup.h = ContentH;
 	Popup.x = Screen.x + (Screen.w - Popup.w) * 0.5f;
 	Popup.y = Screen.y + (Screen.h - Popup.h) * 0.5f;

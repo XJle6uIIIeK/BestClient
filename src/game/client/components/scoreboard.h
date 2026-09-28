@@ -24,10 +24,10 @@ class CScoreboard : public CComponent
 
 	void RenderTitleScore(CUIRect ScoreLabel, int Team, float TitleFontSize);
 	void RenderTitle(CUIRect TitleLabel, int Team, const char *pTitle, float TitleFontSize);
-	void RenderTitleBar(CUIRect TitleBar, int Team, const char *pTitle, const char *pExtraLabel = nullptr);
+	void RenderTitleBar(CUIRect TitleBar, int Team, const char *pTitle);
 	void RenderGoals(CUIRect Goals);
 	void RenderSpectators(CUIRect Spectators);
-	void RenderScoreboard(CUIRect Scoreboard, int Team, int CountStart, int CountEnd, CScoreboardRenderState &State);
+	void RenderScoreboard(CUIRect Scoreboard, int Team, int CountStart, int CountEnd, CScoreboardRenderState &State, int NumPlayersForSize = -1);
 	void RenderRecordingNotification(float x);
 
 	static void ConKeyScoreboard(IConsole::IResult *pResult, void *pUserData);
@@ -44,7 +44,6 @@ class CScoreboard : public CComponent
 
 	void SetUiMousePos(vec2 Pos);
 	void LockMouse();
-	float GetPopupHeight(int ClientId, bool IsLocal, bool IsSpectating) const;
 
 	class CScoreboardPopupContext : public SPopupMenuId
 	{
@@ -55,29 +54,16 @@ class CScoreboard : public CComponent
 		CButtonContainer m_EmoticonAction;
 
 		CButtonContainer m_SpectateButton;
-		CButtonContainer m_ProfileButton;
-		CButtonContainer m_WhisperButton;
-		CButtonContainer m_VoteKickButton;
-		CButtonContainer m_ClipNameButton;
-		CButtonContainer m_SwapButton;
-		CButtonContainer m_CopySkinButton;
+		// bestclient
 		CButtonContainer m_VoiceMuteButton;
 		CButtonContainer m_VoiceVolumeSlider;
-		CButtonContainer m_WarListWarButton;
-		CButtonContainer m_WarListTeamButton;
-		CButtonContainer m_WarListHelperButton;
-
-		CButtonContainer m_TeamExitButton;
-		CButtonContainer m_TeamJoinButton;
-		CButtonContainer m_TeamInviteButton;
-		CButtonContainer m_TeamKickButton;
-		CButtonContainer m_TeamLockButton;
+		int m_VoiceVolumePreview = -1;
+		bool m_VoiceVolumeDirty = false;
+		// bestclient
 
 		int m_ClientId;
 		bool m_IsLocal;
 		bool m_IsSpectating;
-		int m_VoiceVolumePreview = -1;
-		bool m_VoiceVolumeDirty = false;
 
 		static CUi::EPopupMenuFunctionResult Render(void *pContext, CUIRect View, bool Active);
 	} m_ScoreboardPopupContext;
@@ -98,8 +84,23 @@ class CScoreboard : public CComponent
 	public:
 		char m_PlayerButtonId;
 		char m_SpectatorSecondLineButtonId;
+
+		CCachedText m_Score;
+		CCachedText m_ScoreMillis;
+		CCachedText m_Name;
+		CCachedText m_MuteMark;
+		CCachedText m_ReadyMark;
+		CCachedText m_Clan;
+		CCachedText m_Ping;
 	};
 	CPlayerElement m_aPlayers[MAX_CLIENTS];
+
+	CCachedText m_TitleScore;
+	CCachedText m_TitleScoreMillis;
+	CCachedText m_HeadlineScore;
+	CCachedText m_HeadlineName;
+	CCachedText m_HeadlineClan;
+	CCachedText m_HeadlinePing;
 
 public:
 	CScoreboard();
@@ -107,15 +108,19 @@ public:
 	void OnConsoleInit() override;
 	void OnInit() override;
 	void OnReset() override;
+	void OnShutdown() override;
+	void OnWindowResize() override;
 	void OnRender() override;
 	void OnRelease() override;
 	bool OnCursorMove(float x, float y, IInput::ECursorType CursorType) override;
 	bool OnInput(const IInput::CEvent &Event) override;
 
 	bool IsActive() const;
+	// bestclient
 	bool IsShown() const;
+	void ResetTexts();
 	bool IsMouseUnlocked() const { return IsActive() && m_MouseUnlocked; }
-	void OpenPlayerPopup(int ClientId, bool IsSpectating, float PopupX, float PopupY);
+	// bestclient
 };
 
 #endif

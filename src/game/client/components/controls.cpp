@@ -2,7 +2,8 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "controls.h"
 
-#include <base/math.h>
+#include <base/dbg.h>
+#include <base/mem.h>
 #include <base/time.h>
 #include <base/vmath.h>
 
@@ -12,17 +13,18 @@
 #include <generated/protocol.h>
 
 #include <game/client/components/camera.h>
+#include <game/client/components/chat.h>
+#include <game/client/components/bestclient/chat_qol.h> // bestclient
+#include <game/client/components/menus.h>
+#include <game/client/components/scoreboard.h>
 #include <game/client/gameclient.h>
 #include <game/collision.h>
+
+#include <algorithm>
 
 CControls::CControls()
 {
 	mem_zero(&m_aLastData, sizeof(m_aLastData));
-	mem_zero(m_aSnapTapAppliedDirection, sizeof(m_aSnapTapAppliedDirection));
-	mem_zero(m_aSnapTapLastPressedDirection, sizeof(m_aSnapTapLastPressedDirection));
-	mem_zero(m_aSnapTapLastPressedTime, sizeof(m_aSnapTapLastPressedTime));
-	mem_zero(m_aSnapTapPrevLeft, sizeof(m_aSnapTapPrevLeft));
-	mem_zero(m_aSnapTapPrevRight, sizeof(m_aSnapTapPrevRight));
 	std::fill(std::begin(m_aMousePos), std::end(m_aMousePos), vec2(0.0f, 0.0f));
 	std::fill(std::begin(m_aMousePosOnAction), std::end(m_aMousePosOnAction), vec2(0.0f, 0.0f));
 	std::fill(std::begin(m_aTargetPos), std::end(m_aTargetPos), vec2(0.0f, 0.0f));
@@ -52,11 +54,9 @@ void CControls::ResetInput(int Dummy)
 
 	m_aInputDirectionLeft[Dummy] = 0;
 	m_aInputDirectionRight[Dummy] = 0;
-	m_aSnapTapAppliedDirection[Dummy] = 0;
-	m_aSnapTapLastPressedDirection[Dummy] = 0;
-	m_aSnapTapLastPressedTime[Dummy] = 0;
-	m_aSnapTapPrevLeft[Dummy] = 0;
-	m_aSnapTapPrevRight[Dummy] = 0;
+	// bestclient
+	GameClient()->m_SnapTap.Reset(Dummy);
+	// bestclient
 }
 
 void CControls::OnPlayerDeath()
@@ -75,9 +75,6 @@ void CControls::ConKeyInputState(IConsole::IResult *pResult, void *pUserData)
 {
 	CInputState *pState = (CInputState *)pUserData;
 
-	if(pState->m_pControls->GameClient()->m_SwapTimer.IsInputFrozen())
-		return;
-
 	if(pState->m_pControls->GameClient()->m_GameInfo.m_BugDDRaceInput && pState->m_pControls->GameClient()->m_Snap.m_SpecInfo.m_Active)
 		return;
 
@@ -88,9 +85,6 @@ void CControls::ConKeyInputCounter(IConsole::IResult *pResult, void *pUserData)
 {
 	CInputState *pState = (CInputState *)pUserData;
 
-	if(pState->m_pControls->GameClient()->m_SwapTimer.IsInputFrozen())
-		return;
-
 	if((pState->m_pControls->GameClient()->m_GameInfo.m_BugDDRaceInput && pState->m_pControls->GameClient()->m_Snap.m_SpecInfo.m_Active) || pState->m_pControls->GameClient()->m_Spectator.IsActive())
 		return;
 
@@ -98,6 +92,10 @@ void CControls::ConKeyInputCounter(IConsole::IResult *pResult, void *pUserData)
 	if(((*pVariable) & 1) != pResult->GetInteger(0))
 		(*pVariable)++;
 	*pVariable &= INPUT_STATE_MASK;
+	// bestclient
+	if(pVariable == &pState->m_pControls->m_aInputData[g_Config.m_ClDummy].m_Fire)
+		pState->m_pControls->GameClient()->m_BestClient.OnGoresFireInput(pResult->GetInteger(0));
+	// bestclient
 }
 
 struct CInputSet
@@ -190,40 +188,21 @@ void CControls::OnMessage(int Msg, void *pRawMsg)
 		if(g_Config.m_ClAutoswitchWeapons)
 			m_aInputData[g_Config.m_ClDummy].m_WantedWeapon = pMsg->m_Weapon + 1;
 		// We don't really know ammo count, until we'll switch to that weapon, but any non-zero count will suffice here
-		m_aAmmoCount[maximum(0, pMsg->m_Weapon % NUM_WEAPONS)] = 10;
+		m_aAmmoCount[std::max(0, pMsg->m_Weapon % NUM_WEAPONS)] = 10;
 	}
-}
-
-void CControls::GoresMode()
-{
-	if(!GameClient()->m_Snap.m_pLocalCharacter)
-		return;
-	if(!g_Config.m_BcGoresMode)
-		return;
-
-	const int CurWeapon = GameClient()->m_Snap.m_pLocalCharacter->m_Weapon;
-
-	// Only pause cycling while a heavy weapon is the active one, not merely owned
-	m_WeaponsGot = CurWeapon == WEAPON_GRENADE || CurWeapon == WEAPON_LASER || CurWeapon == WEAPON_SHOTGUN;
-	if(g_Config.m_BcGoresModeDisableIfWeapons && m_WeaponsGot)
-		return;
-
-	// WantedWeapon is 1-indexed (0 means "no weapon switch requested")
-	if(CurWeapon == WEAPON_HAMMER)
-		m_aInputData[g_Config.m_ClDummy].m_WantedWeapon = WEAPON_GUN + 1;
 }
 
 int CControls::SnapInput(int *pData)
 {
-	GoresMode();
+	// bestclient
+	GameClient()->m_BestClient.UpdateGoresMode();
+	// bestclient
 
 	// update player state
 	if(GameClient()->m_Chat.IsActive())
 		m_aInputData[g_Config.m_ClDummy].m_PlayerFlags = PLAYERFLAG_CHATTING;
 	else if(GameClient()->m_Menus.IsActive())
 		m_aInputData[g_Config.m_ClDummy].m_PlayerFlags = PLAYERFLAG_IN_MENU;
-	else if(GameClient()->m_SwapTimer.IsInputFrozen()) // BestClient swap peek spectate
-		m_aInputData[g_Config.m_ClDummy].m_PlayerFlags = 0;
 	else
 		m_aInputData[g_Config.m_ClDummy].m_PlayerFlags = PLAYERFLAG_PLAYING;
 
@@ -254,9 +233,9 @@ int CControls::SnapInput(int *pData)
 		for(auto &InputData : m_aInputData)
 			InputData.m_PlayerFlags &= ~PLAYERFLAG_CHATTING;
 
-	if(g_Config.m_BcSilentTyping)
-		for(auto &InputData : m_aInputData)
-			InputData.m_PlayerFlags &= ~PLAYERFLAG_CHATTING;
+	// bestclient
+	CChatQoL::ApplySilentTyping(m_aInputData, NUM_DUMMIES, g_Config.m_BcSilentTyping != 0);
+	// bestclient
 
 	if(g_Config.m_TcNameplatePingCircle)
 		for(auto &InputData : m_aInputData)
@@ -269,8 +248,7 @@ int CControls::SnapInput(int *pData)
 	// we freeze the input if chat or menu is activated
 	if(!(m_aInputData[g_Config.m_ClDummy].m_PlayerFlags & PLAYERFLAG_PLAYING))
 	{
-		// Always clear leftover movement while swap-peeking; DDRace skips ResetInput for chat/menu.
-		if(!GameClient()->m_GameInfo.m_BugDDRaceInput || GameClient()->m_SwapTimer.IsInputFrozen())
+		if(!GameClient()->m_GameInfo.m_BugDDRaceInput)
 			ResetInput(g_Config.m_ClDummy);
 
 		mem_copy(pData, &m_aInputData[g_Config.m_ClDummy], sizeof(m_aInputData[0]));
@@ -321,9 +299,11 @@ int CControls::SnapInput(int *pData)
 			m_aInputData[g_Config.m_ClDummy].m_TargetX = 1;
 
 		// set direction
+		// bestclient
 		const bool LeftPressed = m_aInputDirectionLeft[g_Config.m_ClDummy] != 0;
 		const bool RightPressed = m_aInputDirectionRight[g_Config.m_ClDummy] != 0;
-		m_aInputData[g_Config.m_ClDummy].m_Direction = ResolveMovementDirection(g_Config.m_ClDummy, LeftPressed, RightPressed, /*UpdateState=*/true);
+		m_aInputData[g_Config.m_ClDummy].m_Direction = GameClient()->m_SnapTap.ResolveMovementDirection(g_Config.m_ClDummy, LeftPressed, RightPressed, true);
+		// bestclient
 
 		// dummy copy moves
 		if(g_Config.m_ClDummyCopyMoves)
@@ -362,6 +342,7 @@ int CControls::SnapInput(int *pData)
 				pDummyInput->m_Fire++;
 
 			pDummyInput->m_Hook = g_Config.m_ClDummyHook;
+			m_aInputData[!g_Config.m_ClDummy] = *pDummyInput;
 		}
 
 		// stress testing
@@ -389,6 +370,10 @@ int CControls::SnapInput(int *pData)
 		Send = Send || m_aInputData[g_Config.m_ClDummy].m_PrevWeapon != m_aLastData[g_Config.m_ClDummy].m_PrevWeapon;
 		Send = Send || time_get() > m_LastSendTime + time_freq() / 25; // send at least 25 Hz
 		Send = Send || (GameClient()->m_Snap.m_pLocalCharacter && GameClient()->m_Snap.m_pLocalCharacter->m_Weapon == WEAPON_NINJA && (m_aInputData[g_Config.m_ClDummy].m_Direction || m_aInputData[g_Config.m_ClDummy].m_Jump || m_aInputData[g_Config.m_ClDummy].m_Hook));
+		// bestclient
+		if(GameClient()->m_FastPractice.Enabled())
+			Send = true;
+		// bestclient
 	}
 
 	// copy and return size
@@ -410,7 +395,7 @@ void CControls::OnRender()
 	if(g_Config.m_ClAutoswitchWeaponsOutOfAmmo && !GameClient()->m_GameInfo.m_UnlimitedAmmo && GameClient()->m_Snap.m_pLocalCharacter)
 	{
 		// Keep track of ammo count, we know weapon ammo only when we switch to that weapon, this is tracked on server and protocol does not track that
-		m_aAmmoCount[maximum(0, GameClient()->m_Snap.m_pLocalCharacter->m_Weapon % NUM_WEAPONS)] = GameClient()->m_Snap.m_pLocalCharacter->m_AmmoCount;
+		m_aAmmoCount[std::max(0, GameClient()->m_Snap.m_pLocalCharacter->m_Weapon % NUM_WEAPONS)] = GameClient()->m_Snap.m_pLocalCharacter->m_AmmoCount;
 		// Autoswitch weapon if we're out of ammo
 		if(m_aInputData[g_Config.m_ClDummy].m_Fire % 2 != 0 &&
 			GameClient()->m_Snap.m_pLocalCharacter->m_AmmoCount == 0 &&
@@ -450,11 +435,8 @@ void CControls::OnRender()
 
 bool CControls::OnCursorMove(float x, float y, IInput::ECursorType CursorType)
 {
-	if(GameClient()->m_Snap.m_pGameInfoObj && (GameClient()->m_Snap.m_pGameInfoObj->m_GameStateFlags & GAMESTATEFLAG_PAUSED))
+	if(GameClient()->IsWorldPaused())
 		return false;
-
-	if(GameClient()->m_SwapTimer.IsInputFrozen()) // BestClient
-		return true;
 
 	if(CursorType == IInput::CURSOR_JOYSTICK && g_Config.m_InpControllerAbsolute && GameClient()->m_Snap.m_pGameInfoObj && !GameClient()->m_Snap.m_SpecInfo.m_Active)
 	{
@@ -494,90 +476,6 @@ bool CControls::OnCursorMove(float x, float y, IInput::ECursorType CursorType)
 	GameClient()->m_Controls.m_aMouseInputType[g_Config.m_ClDummy] = CControls::EMouseInputType::RELATIVE;
 	ClampMousePos();
 	return true;
-}
-
-bool CControls::IsSnapTapActive() const
-{
-	return g_Config.m_BcSnapTap != 0 &&
-		!GameClient()->IsSnapTapBlockedByCommunity();
-}
-
-bool CControls::UseGammaInputMovement() const
-{
-	return false;
-}
-
-void CControls::UpdateSnapTapState(int Dummy, bool LeftPressed, bool RightPressed)
-{
-	const int64_t Now = time_get();
-	if(LeftPressed && !m_aSnapTapPrevLeft[Dummy])
-	{
-		m_aSnapTapLastPressedDirection[Dummy] = -1;
-		m_aSnapTapLastPressedTime[Dummy] = Now;
-	}
-	if(RightPressed && !m_aSnapTapPrevRight[Dummy])
-	{
-		m_aSnapTapLastPressedDirection[Dummy] = 1;
-		m_aSnapTapLastPressedTime[Dummy] = Now;
-	}
-
-	m_aSnapTapPrevLeft[Dummy] = LeftPressed ? 1 : 0;
-	m_aSnapTapPrevRight[Dummy] = RightPressed ? 1 : 0;
-}
-
-int CControls::ResolveMovementDirection(int Dummy, bool LeftPressed, bool RightPressed, bool UpdateState)
-{
-	// Edge detection must only ever be driven by the authoritative tick-rate caller (SnapInput). Fast-input
-	// prediction (CheckNewInput / cloud input) polls this every render frame and would otherwise consume the
-	// press/release transition before SnapInput sees it, leaving the wrong tee misprioritized and causing a
-	// visible misprediction stutter whenever the opposite direction is tapped while one is held.
-	if(UpdateState)
-		UpdateSnapTapState(Dummy, LeftPressed, RightPressed);
-
-	if(IsSnapTapActive() || !UseGammaInputMovement())
-		return ResolveSnapTapDirection(Dummy, LeftPressed, RightPressed);
-
-	int Direction = 0;
-	if(LeftPressed && !RightPressed)
-		Direction = -1;
-	if(!LeftPressed && RightPressed)
-		Direction = 1;
-	return Direction;
-}
-
-int CControls::ResolveSnapTapDirection(int Dummy, bool LeftPressed, bool RightPressed)
-{
-	if(LeftPressed == RightPressed)
-	{
-		if(!LeftPressed)
-		{
-			m_aSnapTapAppliedDirection[Dummy] = 0;
-			return 0;
-		}
-
-		if(!IsSnapTapActive())
-			return 0;
-
-		int CandidateDirection = m_aSnapTapLastPressedDirection[Dummy];
-		if(CandidateDirection != -1 && CandidateDirection != 1)
-			CandidateDirection = m_aSnapTapAppliedDirection[Dummy] != 0 ? m_aSnapTapAppliedDirection[Dummy] : -1;
-
-		if(m_aSnapTapAppliedDirection[Dummy] == 0)
-		{
-			m_aSnapTapAppliedDirection[Dummy] = CandidateDirection;
-		}
-		else if(m_aSnapTapAppliedDirection[Dummy] != CandidateDirection)
-		{
-			const int64_t Delay = (time_freq() * (int64_t)g_Config.m_BcSnapTapDelay) / 1000;
-			if(time_get() - m_aSnapTapLastPressedTime[Dummy] >= Delay)
-				m_aSnapTapAppliedDirection[Dummy] = CandidateDirection;
-		}
-
-		return m_aSnapTapAppliedDirection[Dummy];
-	}
-
-	m_aSnapTapAppliedDirection[Dummy] = LeftPressed ? -1 : 1;
-	return m_aSnapTapAppliedDirection[Dummy];
 }
 
 void CControls::ClampMousePos()
@@ -630,17 +528,18 @@ float CControls::GetMaxMouseDistance() const
 	float FollowFactor = (g_Config.m_ClDyncam ? g_Config.m_ClDyncamFollowFactor : g_Config.m_ClMouseFollowfactor) / 100.0f;
 	float DeadZone = g_Config.m_ClDyncam ? g_Config.m_ClDyncamDeadzone : g_Config.m_ClMouseDeadzone;
 	float MaxDistance = g_Config.m_ClDyncam ? g_Config.m_ClDyncamMaxDistance : g_Config.m_ClMouseMaxDistance;
-	return minimum((FollowFactor != 0 ? CameraMaxDistance / FollowFactor + DeadZone : MaxDistance), MaxDistance);
+	return std::min(FollowFactor != 0.0f ? CameraMaxDistance / FollowFactor + DeadZone : MaxDistance, MaxDistance);
 }
 
 bool CControls::CheckNewInput()
 {
+	// bestclient
 	if(g_Config.m_BcInputs == BC_INPUTS_SAIKO && g_Config.m_BcSaikoInputAmount > 0)
 	{
 		CNetObj_PlayerInput TestInput = m_aInputData[g_Config.m_ClDummy];
 		const bool LeftPressed = m_aInputDirectionLeft[g_Config.m_ClDummy] != 0;
 		const bool RightPressed = m_aInputDirectionRight[g_Config.m_ClDummy] != 0;
-		TestInput.m_Direction = ResolveMovementDirection(g_Config.m_ClDummy, LeftPressed, RightPressed, /*UpdateState=*/false);
+		TestInput.m_Direction = GameClient()->m_SnapTap.ResolveMovementDirection(g_Config.m_ClDummy, LeftPressed, RightPressed, false);
 
 		bool NewInput = false;
 		if(m_aFastInput[g_Config.m_ClDummy].m_Direction != TestInput.m_Direction)
@@ -668,6 +567,7 @@ bool CControls::CheckNewInput()
 
 		return NewInput;
 	}
+	// bestclient
 
 	bool NewInput[2] = {};
 	for(int Dummy = 0; Dummy < NUM_DUMMIES; Dummy++)
@@ -675,9 +575,11 @@ bool CControls::CheckNewInput()
 		CNetObj_PlayerInput TestInput = m_aInputData[Dummy];
 		if(Dummy == g_Config.m_ClDummy)
 		{
+			// bestclient
 			const bool LeftPressed = m_aInputDirectionLeft[Dummy] != 0;
 			const bool RightPressed = m_aInputDirectionRight[Dummy] != 0;
-			TestInput.m_Direction = ResolveMovementDirection(Dummy, LeftPressed, RightPressed, /*UpdateState=*/false);
+			TestInput.m_Direction = GameClient()->m_SnapTap.ResolveMovementDirection(Dummy, LeftPressed, RightPressed, false);
+			// bestclient
 		}
 
 		if(m_aFastInput[Dummy].m_Direction != TestInput.m_Direction)
@@ -695,7 +597,11 @@ bool CControls::CheckNewInput()
 		if(m_aFastInput[Dummy].m_WantedWeapon != TestInput.m_WantedWeapon)
 			NewInput[Dummy] = true;
 
-		bool SetMousePos = false;
+		// When sub tick aiming is disabled on the first tick of a hook it's viable to update the fast input
+		// prediction on every mouse movement before the hook+direction input is sent and finalized.
+		const bool RefreshHookAim = g_Config.m_TcFastInputRepredictHook && !g_Config.m_ClSubTickAiming &&
+					    Dummy == g_Config.m_ClDummy && TestInput.m_Hook && !m_aLastData[Dummy].m_Hook;
+		bool SetMousePos = RefreshHookAim;
 		// We need to be careful about how we manage the mouse position to avoid mispredicted hooks and fires
 		// on the first tick that they activate before we know what mouse position we actually sent to the server
 		if(Dummy == g_Config.m_ClDummy)
@@ -720,6 +626,8 @@ bool CControls::CheckNewInput()
 		{
 			TestInput.m_TargetX = (int)m_aMousePos[Dummy].x;
 			TestInput.m_TargetY = (int)m_aMousePos[Dummy].y;
+			if(RefreshHookAim && (TestInput.m_TargetX != m_aFastInput[Dummy].m_TargetX || TestInput.m_TargetY != m_aFastInput[Dummy].m_TargetY))
+				NewInput[Dummy] = true;
 		}
 		else
 		{

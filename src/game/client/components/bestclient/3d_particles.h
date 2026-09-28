@@ -27,40 +27,25 @@ private:
 		vec3 m_RotVel;
 		ColorRGBA m_Color;
 		float m_Size;
-		vec3 m_SpawnOffset;
-		vec3 m_FadeOutOffset;
-		float m_SpawnTime;
-		float m_FadeOutStart;
 		int m_Type;
-		bool m_FadingOut;
 	};
 
 	std::vector<SParticle> m_vParticles;
-	float m_Time = 0.0f;
 	vec2 m_LastLocalPos = vec2(0.0f, 0.0f);
 	bool m_HasLastLocalPos = false;
 	bool m_HasConfigSnapshot = false;
 
 	int m_LastType = 0;
-	int m_LastCount = 0;
 	int m_LastSizeMax = 0;
-	int m_LastSpeed = 0;
-	int m_LastAlpha = 0;
+	int m_LastDensity = 0;
 	int m_LastColorMode = 0;
 	unsigned m_LastColor = 0;
-	int m_LastGlow = 0;
-	int m_LastGlowAlpha = 0;
-	int m_LastGlowOffset = 0;
-	int m_LastDepth = 0;
-	int m_LastFadeInMs = 0;
-	int m_LastFadeOutMs = 0;
-	int m_LastPushRadius = 0;
-	int m_LastPushStrength = 0;
-	int m_LastCollide = 0;
-	int m_LastViewMargin = 0;
+	int m_LastMapW = 0;
+	int m_LastMapH = 0;
+	int m_LastAutoCount = 0;
 
 	void ResetParticles();
-	void RenderParticles(float ViewMinX, float ViewMaxX, float ViewMinY, float ViewMaxY, float BaseAlpha, float FadeIn, float FadeOut);
+	void RenderParticles(float CullMinX, float CullMaxX, float CullMinY, float CullMaxY, float BaseAlpha);
 };
 
 #endif

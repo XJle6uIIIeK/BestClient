@@ -3,7 +3,6 @@
 #define GAME_CLIENT_COMPONENTS_BESTCLIENT_CLIENTINDICATOR_CLIENT_INDICATOR_H
 
 #include "client_indicator_sync.h"
-#include "../subsystem_runtime.h"
 #include "browser_cache.h"
 #include "presence_cache.h"
 
@@ -11,7 +10,7 @@
 
 #include <game/client/component.h>
 
-#include <engine/shared/http.h>
+#include <engine/http.h>
 #include <engine/shared/uuid_manager.h>
 
 #include <memory>
@@ -33,6 +32,7 @@ public:
 	bool IsPlayerBestClient(int ClientId) const;
 	bool IsPlayerBClient(int ClientId) { return IsPlayerBestClient(ClientId); }
 	bool IsPlayerDeveloper(int ClientId) const;
+	bool IsPlayerFakeVersion(int ClientId) const;
 	bool GetPlayerVersionLabel(int ClientId, char *pVersion, int VersionSize) const;
 
 	const std::unordered_map<std::string, std::unordered_map<std::string, std::string>> &AllPlayerVersions() const { return m_BrowserCache.PlayerVersionsByServer(); }
@@ -40,6 +40,7 @@ public:
 	void RefreshBrowserCache(bool Force);
 	void RefreshToken(bool Force);
 	void ReapplyBrowserSnapshot();
+	bool IsBrowserCacheRefreshing() const;
 
 private:
 	NETSOCKET m_Socket = nullptr;
@@ -49,12 +50,10 @@ private:
 	char m_aLastGameServerAddr[NETADDR_MAXSTRSIZE] = "";
 	char m_aLastBlockedGameServerAddr[NETADDR_MAXSTRSIZE] = "";
 	bool m_WasPresenceEnabled = false;
-	ESubsystemRuntimeState m_RuntimeState = ESubsystemRuntimeState::DISABLED;
 	int64_t m_LastHeartbeatTick = 0;
 	int64_t m_LastPresenceStartAttempt = 0;
 	int64_t m_LastBrowserRefreshTick = 0;
 	int64_t m_LastTokenRefreshTick = 0;
-	int64_t m_NextPresenceBrowserRefreshTick = 0;
 	int64_t m_LastPresencePollTick = 0;
 	int64_t m_LastRegistrationSyncTick = 0;
 	int64_t m_LastPerfReportTick = 0;
@@ -62,14 +61,16 @@ private:
 	int64_t m_MaxUpdateCostTick = 0;
 	int64_t m_TotalUpdateCostTick = 0;
 	int64_t m_UpdateSamples = 0;
+	char m_aCachedGameServerAddr[NETADDR_MAXSTRSIZE] = "";
 	CUuid m_ClientInstanceId = UUID_ZEROED;
 	std::unordered_set<int> m_RegisteredClientIds;
 	std::unordered_set<int> m_DeveloperClientIds;
+	std::unordered_set<int> m_FakeClientIds;
 	std::unordered_map<int, std::string> m_ClientVersions;
 	CPresenceCache m_PresenceCache;
 
-	std::shared_ptr<CHttpRequest> m_pBrowserTask = nullptr;
-	std::shared_ptr<CHttpRequest> m_pTokenTask = nullptr;
+	std::shared_ptr<IHttpRequest> m_pBrowserTask = nullptr;
+	std::shared_ptr<IHttpRequest> m_pTokenTask = nullptr;
 	CBrowserCache m_BrowserCache;
 	char m_aWebSharedToken[256] = "";
 	std::string m_LastPresenceBlockReason;
@@ -94,11 +95,7 @@ private:
 	void ResetTokenTask();
 	void ResetPresenceState();
 	void ResetTokenState();
-	void ClearBrowserSnapshot();
 	void ApplyBrowserSnapshot();
-	void SchedulePresenceBrowserRefresh();
-	bool HasPendingNetworkTask() const;
-	bool IsBrowserSnapshotEnabled() const;
 	bool IsPresenceEnabled() const;
 	const char *EffectiveSharedToken() const;
 	void DebugLog(const char *pText) const;

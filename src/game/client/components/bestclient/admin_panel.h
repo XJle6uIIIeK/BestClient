@@ -61,6 +61,7 @@ public:
 	void OnConsoleInit() override;
 	void OnReset() override;
 	void OnRelease() override;
+	void InitEmptyTexts();
 	void OnRender() override;
 	bool OnCursorMove(float x, float y, IInput::ECursorType CursorType) override;
 	bool OnInput(const IInput::CEvent &Event) override;

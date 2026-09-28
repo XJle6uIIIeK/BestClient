@@ -2,7 +2,8 @@
 #define ENGINE_SHARED_BESTCLIENT_INDICATOR_PROTOCOL_H
 
 #include <base/hash.h>
-#include <base/system.h>
+#include <base/net.h>
+#include <base/str.h>
 
 #include <engine/shared/uuid_manager.h>
 
@@ -12,7 +13,7 @@
 
 namespace BestClientIndicator
 {
-constexpr uint32_t PROTOCOL_MAGIC = 0x42434931u; // BCI1
+constexpr uint32_t PROTOCOL_MAGIC = 0x42434931u;
 constexpr uint8_t PROTOCOL_VERSION = 1;
 constexpr int DEFAULT_PORT = 8778;
 constexpr int MAX_RECEIVE_PACKETS_PER_TICK = 32;
@@ -73,6 +74,8 @@ struct CPeerVersionState
 	std::string m_PlayerName;
 	int m_ClientId = -1;
 	std::string m_ClientVersion;
+	bool m_Fake = false;
+	std::string m_Checksum;
 };
 
 struct CClientVersionPacket
@@ -84,6 +87,7 @@ struct CClientVersionPacket
 	std::string m_PlayerName;
 	int m_ClientId = -1;
 	std::string m_ClientVersion;
+	std::string m_Checksum;
 };
 
 void WriteU8(std::vector<uint8_t> &vOut, uint8_t Value);
@@ -128,7 +132,7 @@ void WritePeerStatePacket(std::vector<uint8_t> &vOut, EPacketType Type, const ch
 void WritePeerListPacket(std::vector<uint8_t> &vOut, const char *pServerAddress, const std::vector<int> &vClientIds);
 void WritePeerDevStatePacket(std::vector<uint8_t> &vOut, const char *pServerAddress, const char *pPlayerName, int ClientId, bool Developer);
 void WritePeerDevListPacket(std::vector<uint8_t> &vOut, const char *pServerAddress, const std::vector<int> &vClientIds);
-void WritePeerVersionStatePacket(std::vector<uint8_t> &vOut, const char *pServerAddress, const char *pPlayerName, int ClientId, const char *pClientVersion);
+void WritePeerVersionStatePacket(std::vector<uint8_t> &vOut, const char *pServerAddress, const char *pPlayerName, int ClientId, const char *pClientVersion, bool Fake, const char *pChecksum);
 void WriteDevAuthResultPacket(std::vector<uint8_t> &vOut, const char *pServerAddress, int ClientId, bool Success);
 }
 

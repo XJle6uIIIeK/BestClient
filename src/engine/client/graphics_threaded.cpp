@@ -1,10 +1,15 @@
 /* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 
+#include "graphics_threaded.h"
+
+#include <base/dbg.h>
 #include <base/detect.h>
+#include <base/io.h>
 #include <base/log.h>
-#include <base/math.h>
-#include <base/system.h>
+#include <base/mem.h>
+#include <base/str.h>
+#include <base/time.h>
 
 #include <engine/engine.h>
 #include <engine/gfx/image_loader.h>
@@ -23,36 +28,23 @@
 #include <engine/shared/video.h>
 #endif
 
-#include "graphics_threaded.h"
+#include <algorithm>
 
 class CSemaphore;
 
 static CVideoMode g_aFakeModes[] = {
-	{8192, 4320, 8192, 4320, 0, 8, 8, 8, 0}, {7680, 4320, 7680, 4320, 0, 8, 8, 8, 0}, {5120, 2880, 5120, 2880, 0, 8, 8, 8, 0},
-	{4096, 2160, 4096, 2160, 0, 8, 8, 8, 0}, {3840, 2160, 3840, 2160, 0, 8, 8, 8, 0}, {2560, 1440, 2560, 1440, 0, 8, 8, 8, 0},
-	{2048, 1536, 2048, 1536, 0, 8, 8, 8, 0}, {1920, 2400, 1920, 2400, 0, 8, 8, 8, 0}, {1920, 1440, 1920, 1440, 0, 8, 8, 8, 0},
-	{1920, 1200, 1920, 1200, 0, 8, 8, 8, 0}, {1920, 1080, 1920, 1080, 0, 8, 8, 8, 0}, {1856, 1392, 1856, 1392, 0, 8, 8, 8, 0},
-	{1800, 1440, 1800, 1440, 0, 8, 8, 8, 0}, {1792, 1344, 1792, 1344, 0, 8, 8, 8, 0}, {1680, 1050, 1680, 1050, 0, 8, 8, 8, 0},
-	{1600, 1200, 1600, 1200, 0, 8, 8, 8, 0}, {1600, 1000, 1600, 1000, 0, 8, 8, 8, 0}, {1440, 1050, 1440, 1050, 0, 8, 8, 8, 0},
-	{1440, 900, 1440, 900, 0, 8, 8, 8, 0}, {1400, 1050, 1400, 1050, 0, 8, 8, 8, 0}, {1368, 768, 1368, 768, 0, 8, 8, 8, 0},
-	{1280, 1024, 1280, 1024, 0, 8, 8, 8, 0}, {1280, 960, 1280, 960, 0, 8, 8, 8, 0}, {1280, 800, 1280, 800, 0, 8, 8, 8, 0},
-	{1280, 768, 1280, 768, 0, 8, 8, 8, 0}, {1152, 864, 1152, 864, 0, 8, 8, 8, 0}, {1024, 768, 1024, 768, 0, 8, 8, 8, 0},
-	{1024, 600, 1024, 600, 0, 8, 8, 8, 0}, {800, 600, 800, 600, 0, 8, 8, 8, 0}, {768, 576, 768, 576, 0, 8, 8, 8, 0},
-	{720, 400, 720, 400, 0, 8, 8, 8, 0}, {640, 480, 640, 480, 0, 8, 8, 8, 0}, {400, 300, 400, 300, 0, 8, 8, 8, 0},
-	{320, 240, 320, 240, 0, 8, 8, 8, 0},
-
-	{8192, 4320, 8192, 4320, 0, 5, 6, 5, 0}, {7680, 4320, 7680, 4320, 0, 5, 6, 5, 0}, {5120, 2880, 5120, 2880, 0, 5, 6, 5, 0},
-	{4096, 2160, 4096, 2160, 0, 5, 6, 5, 0}, {3840, 2160, 3840, 2160, 0, 5, 6, 5, 0}, {2560, 1440, 2560, 1440, 0, 5, 6, 5, 0},
-	{2048, 1536, 2048, 1536, 0, 5, 6, 5, 0}, {1920, 2400, 1920, 2400, 0, 5, 6, 5, 0}, {1920, 1440, 1920, 1440, 0, 5, 6, 5, 0},
-	{1920, 1200, 1920, 1200, 0, 5, 6, 5, 0}, {1920, 1080, 1920, 1080, 0, 5, 6, 5, 0}, {1856, 1392, 1856, 1392, 0, 5, 6, 5, 0},
-	{1800, 1440, 1800, 1440, 0, 5, 6, 5, 0}, {1792, 1344, 1792, 1344, 0, 5, 6, 5, 0}, {1680, 1050, 1680, 1050, 0, 5, 6, 5, 0},
-	{1600, 1200, 1600, 1200, 0, 5, 6, 5, 0}, {1600, 1000, 1600, 1000, 0, 5, 6, 5, 0}, {1440, 1050, 1440, 1050, 0, 5, 6, 5, 0},
-	{1440, 900, 1440, 900, 0, 5, 6, 5, 0}, {1400, 1050, 1400, 1050, 0, 5, 6, 5, 0}, {1368, 768, 1368, 768, 0, 5, 6, 5, 0},
-	{1280, 1024, 1280, 1024, 0, 5, 6, 5, 0}, {1280, 960, 1280, 960, 0, 5, 6, 5, 0}, {1280, 800, 1280, 800, 0, 5, 6, 5, 0},
-	{1280, 768, 1280, 768, 0, 5, 6, 5, 0}, {1152, 864, 1152, 864, 0, 5, 6, 5, 0}, {1024, 768, 1024, 768, 0, 5, 6, 5, 0},
-	{1024, 600, 1024, 600, 0, 5, 6, 5, 0}, {800, 600, 800, 600, 0, 5, 6, 5, 0}, {768, 576, 768, 576, 0, 5, 6, 5, 0},
-	{720, 400, 720, 400, 0, 5, 6, 5, 0}, {640, 480, 640, 480, 0, 5, 6, 5, 0}, {400, 300, 400, 300, 0, 5, 6, 5, 0},
-	{320, 240, 320, 240, 0, 5, 6, 5, 0}};
+	{8192, 4320, 8192, 4320, 0}, {7680, 4320, 7680, 4320, 0}, {5120, 2880, 5120, 2880, 0},
+	{4096, 2160, 4096, 2160, 0}, {3840, 2160, 3840, 2160, 0}, {2560, 1440, 2560, 1440, 0},
+	{2048, 1536, 2048, 1536, 0}, {1920, 2400, 1920, 2400, 0}, {1920, 1440, 1920, 1440, 0},
+	{1920, 1200, 1920, 1200, 0}, {1920, 1080, 1920, 1080, 0}, {1856, 1392, 1856, 1392, 0},
+	{1800, 1440, 1800, 1440, 0}, {1792, 1344, 1792, 1344, 0}, {1680, 1050, 1680, 1050, 0},
+	{1600, 1200, 1600, 1200, 0}, {1600, 1000, 1600, 1000, 0}, {1440, 1050, 1440, 1050, 0},
+	{1440, 900, 1440, 900, 0}, {1400, 1050, 1400, 1050, 0}, {1368, 768, 1368, 768, 0},
+	{1280, 1024, 1280, 1024, 0}, {1280, 960, 1280, 960, 0}, {1280, 800, 1280, 800, 0},
+	{1280, 768, 1280, 768, 0}, {1152, 864, 1152, 864, 0}, {1024, 768, 1024, 768, 0},
+	{1024, 600, 1024, 600, 0}, {800, 600, 800, 600, 0}, {768, 576, 768, 576, 0},
+	{720, 400, 720, 400, 0}, {640, 480, 640, 480, 0}, {400, 300, 400, 300, 0},
+	{320, 240, 320, 240, 0}};
 
 void CGraphics_Threaded::FlushVertices(bool KeepVertices)
 {
@@ -111,7 +103,7 @@ CGraphics_Threaded::CGraphics_Threaded()
 	m_State.m_ClipW = 0;
 	m_State.m_ClipH = 0;
 	m_State.m_Texture = -1;
-	m_State.m_BlendMode = EBlendMode::NONE;
+	m_State.m_BlendMode = EBlendMode::ALPHA;
 	m_State.m_WrapMode = EWrapMode::REPEAT;
 
 	m_CurrentCommandBuffer = 0;
@@ -123,6 +115,8 @@ CGraphics_Threaded::CGraphics_Threaded()
 
 	m_ScreenWidth = -1;
 	m_ScreenHeight = -1;
+	m_DrawableWidth = -1;
+	m_DrawableHeight = -1;
 	m_ScreenRefreshRate = -1;
 
 	m_Rotation = 0;
@@ -208,27 +202,22 @@ const TTwGraphicsGpuList &CGraphics_Threaded::GetGpus() const
 	return m_pBackend->GetGpus();
 }
 
-void CGraphics_Threaded::MapScreen(float TopLeftX, float TopLeftY, float BottomRightX, float BottomRightY)
+void CGraphics_Threaded::MapScreen(const CScreenRect &ScreenRect)
 {
-	m_State.m_ScreenTL.x = TopLeftX;
-	m_State.m_ScreenTL.y = TopLeftY;
-	m_State.m_ScreenBR.x = BottomRightX;
-	m_State.m_ScreenBR.y = BottomRightY;
+	m_State.m_ScreenTL = ScreenRect.m_TopLeft;
+	m_State.m_ScreenBR = ScreenRect.m_BottomRight;
 }
 
-void CGraphics_Threaded::GetScreen(float *pTopLeftX, float *pTopLeftY, float *pBottomRightX, float *pBottomRightY) const
+CScreenRect CGraphics_Threaded::GetScreen() const
 {
-	*pTopLeftX = m_State.m_ScreenTL.x;
-	*pTopLeftY = m_State.m_ScreenTL.y;
-	*pBottomRightX = m_State.m_ScreenBR.x;
-	*pBottomRightY = m_State.m_ScreenBR.y;
+	return CScreenRect(m_State.m_ScreenTL, m_State.m_ScreenBR);
 }
 
 void CGraphics_Threaded::LinesBegin()
 {
 	dbg_assert(m_Drawing == EDrawing::NONE, "called Graphics()->LinesBegin twice");
 	m_Drawing = EDrawing::LINES;
-	SetColor(1, 1, 1, 1);
+	SetColor(ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f));
 }
 
 void CGraphics_Threaded::LinesEnd()
@@ -248,13 +237,13 @@ void CGraphics_Threaded::LinesDraw(const CLineItem *pArray, size_t Num)
 		m_aVertices[VertexIndex].m_Pos.x = pArray[i].m_X0;
 		m_aVertices[VertexIndex].m_Pos.y = pArray[i].m_Y0;
 		m_aVertices[VertexIndex].m_Tex = m_aTexture[0];
-		SetColor(&m_aVertices[VertexIndex], 0);
+		m_aVertices[VertexIndex].m_Color = m_aColor[0];
 		++VertexIndex;
 
 		m_aVertices[VertexIndex].m_Pos.x = pArray[i].m_X1;
 		m_aVertices[VertexIndex].m_Pos.y = pArray[i].m_Y1;
 		m_aVertices[VertexIndex].m_Tex = m_aTexture[1];
-		SetColor(&m_aVertices[VertexIndex], 1);
+		m_aVertices[VertexIndex].m_Color = m_aColor[1];
 		++VertexIndex;
 	}
 
@@ -330,7 +319,7 @@ void CGraphics_Threaded::UnloadTexture(CTextureHandle *pIndex)
 	FreeTextureIndex(pIndex);
 }
 
-IGraphics::CTextureHandle CGraphics_Threaded::LoadSpriteTexture(const CImageInfo &FromImageInfo, const CDataSprite *pSprite)
+IGraphics::CTextureHandle CGraphics_Threaded::LoadSpriteTexture(const CImageInfo &FromImageInfo, const std::optional<CImageInfo> &FallbackImageInfo, const CDataSprite *pSprite)
 {
 	int ImageGridX = FromImageInfo.m_Width / pSprite->m_pSet->m_Gridx;
 	int ImageGridY = FromImageInfo.m_Height / pSprite->m_pSet->m_Gridy;
@@ -339,11 +328,20 @@ IGraphics::CTextureHandle CGraphics_Threaded::LoadSpriteTexture(const CImageInfo
 	int w = pSprite->m_W * ImageGridX;
 	int h = pSprite->m_H * ImageGridY;
 
+	// check for invisible texture, maybe due to outdated game assets
+	if(FallbackImageInfo.has_value() && IsImageSubFullyTransparent(FromImageInfo, x, y, w, h))
+	{
+		// TClient: Do not fall back to default: players intentionally use transparent custom assets (e.g. hooks/cursors).
+		log_warn("graphics", "Asset '%s' appears to be invisible", pSprite->m_pName);
+		// log_warn("graphics", "Asset '%s' appears to be invisible, falling back to default", pSprite->m_pName);
+		// return LoadSpriteTexture(FallbackImageInfo.value(), std::nullopt, pSprite);
+	}
+
 	CImageInfo SpriteInfo;
 	SpriteInfo.m_Width = w;
 	SpriteInfo.m_Height = h;
 	SpriteInfo.m_Format = FromImageInfo.m_Format;
-	SpriteInfo.m_pData = static_cast<uint8_t *>(malloc(SpriteInfo.DataSize()));
+	SpriteInfo.Allocate();
 	SpriteInfo.CopyRectFrom(FromImageInfo, x, y, w, h, 0, 0);
 	return LoadTextureRawMove(SpriteInfo, 0, pSprite->m_pName);
 }
@@ -539,6 +537,34 @@ bool CGraphics_Threaded::UpdateTextTexture(CTextureHandle TextureId, int x, int 
 	return true;
 }
 
+bool CGraphics_Threaded::UpdateTextureRaw(CTextureHandle TextureId, int x, int y, size_t Width, size_t Height, uint8_t *pData, bool IsMovedPointer)
+{
+	if(!TextureId.IsValid() || Width == 0 || Height == 0 || pData == nullptr)
+		return false;
+
+	CCommandBuffer::SCommand_Texture_Update Cmd;
+	Cmd.m_Slot = TextureId.Id();
+	Cmd.m_X = x;
+	Cmd.m_Y = y;
+	Cmd.m_Width = Width;
+	Cmd.m_Height = Height;
+
+	if(IsMovedPointer)
+	{
+		Cmd.m_pData = pData;
+	}
+	else
+	{
+		const size_t MemSize = Width * Height * 4;
+		uint8_t *pTmpData = static_cast<uint8_t *>(malloc(MemSize));
+		mem_copy(pTmpData, pData, MemSize);
+		Cmd.m_pData = pTmpData;
+	}
+	AddCmd(Cmd);
+
+	return true;
+}
+
 static SWarning FormatPngliteIncompatibilityWarning(int PngliteIncompatible, const char *pContextName)
 {
 	SWarning Warning;
@@ -618,12 +644,12 @@ bool CGraphics_Threaded::CheckImageDivisibility(const char *pContextName, CImage
 		int NewHeight = DivY;
 		if(WidthBroken)
 		{
-			NewWidth = maximum<int>(HighestBit(Image.m_Width), DivX);
+			NewWidth = std::max(HighestBit(Image.m_Width), DivX);
 			NewHeight = (NewWidth / DivX) * DivY;
 		}
 		else
 		{
-			NewHeight = maximum<int>(HighestBit(Image.m_Height), DivY);
+			NewHeight = std::max(HighestBit(Image.m_Height), DivY);
 			NewWidth = (NewHeight / DivY) * DivX;
 		}
 		ResizeImage(Image, NewWidth, NewHeight);
@@ -725,6 +751,10 @@ void CGraphics_Threaded::ScreenshotDirect(bool *pSwapped)
 	{
 		m_pEngine->AddJob(std::make_shared<CScreenshotSaveJob>(m_pStorage, m_aScreenshotName, std::move(Image)));
 	}
+	else
+	{
+		log_error("graphics", "Failed to create screenshot");
+	}
 }
 
 void CGraphics_Threaded::TextureSet(CTextureHandle TextureId)
@@ -752,7 +782,7 @@ void CGraphics_Threaded::QuadsBegin()
 
 	QuadsSetSubset(0, 0, 1, 1);
 	QuadsSetRotation(0);
-	SetColor(1, 1, 1, 1);
+	SetColor(ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f));
 }
 
 void CGraphics_Threaded::QuadsEnd()
@@ -781,7 +811,7 @@ void CGraphics_Threaded::TrianglesBegin()
 
 	QuadsSetSubset(0, 0, 1, 1);
 	QuadsSetRotation(0);
-	SetColor(1, 1, 1, 1);
+	SetColor(ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f));
 }
 
 void CGraphics_Threaded::TrianglesEnd()
@@ -810,62 +840,47 @@ void CGraphics_Threaded::QuadsSetRotation(float Angle)
 	m_Rotation = Angle;
 }
 
-static unsigned char NormalizeColorComponent(float ColorComponent)
+constexpr static unsigned char NormalizeColorComponent(float ColorComponent)
 {
 	return (unsigned char)(std::clamp(ColorComponent, 0.0f, 1.0f) * 255.0f + 0.5f); // +0.5f to round to nearest
 }
 
-void CGraphics_Threaded::SetColorVertex(const CColorVertex *pArray, size_t Num)
+constexpr static CCommandBuffer::SColor NormalizeColor(ColorRGBA Color)
 {
-	dbg_assert(m_Drawing != EDrawing::NONE, "called Graphics()->SetColorVertex without begin");
-
-	for(size_t i = 0; i < Num; ++i)
-	{
-		const CColorVertex &Vertex = pArray[i];
-		CCommandBuffer::SColor &Color = m_aColor[Vertex.m_Index];
-		Color.r = NormalizeColorComponent(Vertex.m_R);
-		Color.g = NormalizeColorComponent(Vertex.m_G);
-		Color.b = NormalizeColorComponent(Vertex.m_B);
-		Color.a = NormalizeColorComponent(Vertex.m_A);
-	}
+	CCommandBuffer::SColor NormalizedColor;
+	NormalizedColor.r = NormalizeColorComponent(Color.r);
+	NormalizedColor.g = NormalizeColorComponent(Color.g);
+	NormalizedColor.b = NormalizeColorComponent(Color.b);
+	NormalizedColor.a = NormalizeColorComponent(Color.a);
+	return NormalizedColor;
 }
 
 void CGraphics_Threaded::SetColor(float r, float g, float b, float a)
 {
-	CCommandBuffer::SColor NewColor;
-	NewColor.r = NormalizeColorComponent(r);
-	NewColor.g = NormalizeColorComponent(g);
-	NewColor.b = NormalizeColorComponent(b);
-	NewColor.a = NormalizeColorComponent(a);
-	std::fill(std::begin(m_aColor), std::end(m_aColor), NewColor);
+	SetColor(ColorRGBA(r, g, b, a));
 }
 
 void CGraphics_Threaded::SetColor(ColorRGBA Color)
 {
-	SetColor(Color.r, Color.g, Color.b, Color.a);
+	std::fill(std::begin(m_aColor), std::end(m_aColor), NormalizeColor(Color));
+}
+
+void CGraphics_Threaded::SetColor2(ColorRGBA First, ColorRGBA Second)
+{
+	dbg_assert(m_Drawing == EDrawing::LINES, "Called Graphics()->SetColor2 while not drawing lines");
+
+	m_aColor[0] = NormalizeColor(First);
+	m_aColor[1] = NormalizeColor(Second);
 }
 
 void CGraphics_Threaded::SetColor4(ColorRGBA TopLeft, ColorRGBA TopRight, ColorRGBA BottomLeft, ColorRGBA BottomRight)
 {
-	CColorVertex aArray[] = {
-		CColorVertex(0, TopLeft),
-		CColorVertex(1, TopRight),
-		CColorVertex(2, BottomRight),
-		CColorVertex(3, BottomLeft)};
-	SetColorVertex(aArray, std::size(aArray));
-}
+	dbg_assert(m_Drawing == EDrawing::QUADS || m_Drawing == EDrawing::TRIANGLES, "Called Graphics()->SetColor4 while not drawing quads or triangles");
 
-void CGraphics_Threaded::ChangeColorOfCurrentQuadVertices(float r, float g, float b, float a)
-{
-	m_aColor[0].r = NormalizeColorComponent(r);
-	m_aColor[0].g = NormalizeColorComponent(g);
-	m_aColor[0].b = NormalizeColorComponent(b);
-	m_aColor[0].a = NormalizeColorComponent(a);
-
-	for(int i = 0; i < m_NumVertices; ++i)
-	{
-		SetColor(&m_aVertices[i], 0);
-	}
+	m_aColor[0] = NormalizeColor(TopLeft);
+	m_aColor[1] = NormalizeColor(TopRight);
+	m_aColor[2] = NormalizeColor(BottomRight);
+	m_aColor[3] = NormalizeColor(BottomLeft);
 }
 
 void CGraphics_Threaded::ChangeColorOfQuadVertices(size_t QuadOffset, unsigned char r, unsigned char g, unsigned char b, unsigned char a)
@@ -949,32 +964,32 @@ void CGraphics_Threaded::QuadsDrawFreeform(const CFreeformItem *pArray, int Num)
 			m_aVertices[m_NumVertices + 6 * i].m_Pos.x = pArray[i].m_X0;
 			m_aVertices[m_NumVertices + 6 * i].m_Pos.y = pArray[i].m_Y0;
 			m_aVertices[m_NumVertices + 6 * i].m_Tex = m_aTexture[0];
-			SetColor(&m_aVertices[m_NumVertices + 6 * i], 0);
+			m_aVertices[m_NumVertices + 6 * i].m_Color = m_aColor[0];
 
 			m_aVertices[m_NumVertices + 6 * i + 1].m_Pos.x = pArray[i].m_X1;
 			m_aVertices[m_NumVertices + 6 * i + 1].m_Pos.y = pArray[i].m_Y1;
 			m_aVertices[m_NumVertices + 6 * i + 1].m_Tex = m_aTexture[1];
-			SetColor(&m_aVertices[m_NumVertices + 6 * i + 1], 1);
+			m_aVertices[m_NumVertices + 6 * i + 1].m_Color = m_aColor[1];
 
 			m_aVertices[m_NumVertices + 6 * i + 2].m_Pos.x = pArray[i].m_X3;
 			m_aVertices[m_NumVertices + 6 * i + 2].m_Pos.y = pArray[i].m_Y3;
 			m_aVertices[m_NumVertices + 6 * i + 2].m_Tex = m_aTexture[3];
-			SetColor(&m_aVertices[m_NumVertices + 6 * i + 2], 3);
+			m_aVertices[m_NumVertices + 6 * i + 2].m_Color = m_aColor[3];
 
 			m_aVertices[m_NumVertices + 6 * i + 3].m_Pos.x = pArray[i].m_X0;
 			m_aVertices[m_NumVertices + 6 * i + 3].m_Pos.y = pArray[i].m_Y0;
 			m_aVertices[m_NumVertices + 6 * i + 3].m_Tex = m_aTexture[0];
-			SetColor(&m_aVertices[m_NumVertices + 6 * i + 3], 0);
+			m_aVertices[m_NumVertices + 6 * i + 3].m_Color = m_aColor[0];
 
 			m_aVertices[m_NumVertices + 6 * i + 4].m_Pos.x = pArray[i].m_X3;
 			m_aVertices[m_NumVertices + 6 * i + 4].m_Pos.y = pArray[i].m_Y3;
 			m_aVertices[m_NumVertices + 6 * i + 4].m_Tex = m_aTexture[3];
-			SetColor(&m_aVertices[m_NumVertices + 6 * i + 4], 3);
+			m_aVertices[m_NumVertices + 6 * i + 4].m_Color = m_aColor[3];
 
 			m_aVertices[m_NumVertices + 6 * i + 5].m_Pos.x = pArray[i].m_X2;
 			m_aVertices[m_NumVertices + 6 * i + 5].m_Pos.y = pArray[i].m_Y2;
 			m_aVertices[m_NumVertices + 6 * i + 5].m_Tex = m_aTexture[2];
-			SetColor(&m_aVertices[m_NumVertices + 6 * i + 5], 2);
+			m_aVertices[m_NumVertices + 6 * i + 5].m_Color = m_aColor[2];
 		}
 
 		AddVertices(3 * 2 * Num);
@@ -986,22 +1001,22 @@ void CGraphics_Threaded::QuadsDrawFreeform(const CFreeformItem *pArray, int Num)
 			m_aVertices[m_NumVertices + 4 * i].m_Pos.x = pArray[i].m_X0;
 			m_aVertices[m_NumVertices + 4 * i].m_Pos.y = pArray[i].m_Y0;
 			m_aVertices[m_NumVertices + 4 * i].m_Tex = m_aTexture[0];
-			SetColor(&m_aVertices[m_NumVertices + 4 * i], 0);
+			m_aVertices[m_NumVertices + 4 * i].m_Color = m_aColor[0];
 
 			m_aVertices[m_NumVertices + 4 * i + 1].m_Pos.x = pArray[i].m_X1;
 			m_aVertices[m_NumVertices + 4 * i + 1].m_Pos.y = pArray[i].m_Y1;
 			m_aVertices[m_NumVertices + 4 * i + 1].m_Tex = m_aTexture[1];
-			SetColor(&m_aVertices[m_NumVertices + 4 * i + 1], 1);
+			m_aVertices[m_NumVertices + 4 * i + 1].m_Color = m_aColor[1];
 
 			m_aVertices[m_NumVertices + 4 * i + 2].m_Pos.x = pArray[i].m_X3;
 			m_aVertices[m_NumVertices + 4 * i + 2].m_Pos.y = pArray[i].m_Y3;
 			m_aVertices[m_NumVertices + 4 * i + 2].m_Tex = m_aTexture[3];
-			SetColor(&m_aVertices[m_NumVertices + 4 * i + 2], 3);
+			m_aVertices[m_NumVertices + 4 * i + 2].m_Color = m_aColor[3];
 
 			m_aVertices[m_NumVertices + 4 * i + 3].m_Pos.x = pArray[i].m_X2;
 			m_aVertices[m_NumVertices + 4 * i + 3].m_Pos.y = pArray[i].m_Y2;
 			m_aVertices[m_NumVertices + 4 * i + 3].m_Tex = m_aTexture[2];
-			SetColor(&m_aVertices[m_NumVertices + 4 * i + 3], 2);
+			m_aVertices[m_NumVertices + 4 * i + 3].m_Color = m_aColor[2];
 		}
 
 		AddVertices(4 * Num);
@@ -1594,22 +1609,22 @@ int CGraphics_Threaded::QuadContainerAddQuads(int ContainerIndex, CQuadItem *pAr
 		Quad.m_aVertices[0].m_Pos.x = pArray[i].m_X;
 		Quad.m_aVertices[0].m_Pos.y = pArray[i].m_Y;
 		Quad.m_aVertices[0].m_Tex = m_aTexture[0];
-		SetColor(&Quad.m_aVertices[0], 0);
+		Quad.m_aVertices[0].m_Color = m_aColor[0];
 
 		Quad.m_aVertices[1].m_Pos.x = pArray[i].m_X + pArray[i].m_Width;
 		Quad.m_aVertices[1].m_Pos.y = pArray[i].m_Y;
 		Quad.m_aVertices[1].m_Tex = m_aTexture[1];
-		SetColor(&Quad.m_aVertices[1], 1);
+		Quad.m_aVertices[1].m_Color = m_aColor[1];
 
 		Quad.m_aVertices[2].m_Pos.x = pArray[i].m_X + pArray[i].m_Width;
 		Quad.m_aVertices[2].m_Pos.y = pArray[i].m_Y + pArray[i].m_Height;
 		Quad.m_aVertices[2].m_Tex = m_aTexture[2];
-		SetColor(&Quad.m_aVertices[2], 2);
+		Quad.m_aVertices[2].m_Color = m_aColor[2];
 
 		Quad.m_aVertices[3].m_Pos.x = pArray[i].m_X;
 		Quad.m_aVertices[3].m_Pos.y = pArray[i].m_Y + pArray[i].m_Height;
 		Quad.m_aVertices[3].m_Tex = m_aTexture[3];
-		SetColor(&Quad.m_aVertices[3], 3);
+		Quad.m_aVertices[3].m_Color = m_aColor[3];
 
 		if(m_Rotation != 0)
 		{
@@ -1644,22 +1659,22 @@ int CGraphics_Threaded::QuadContainerAddQuads(int ContainerIndex, CFreeformItem 
 		Quad.m_aVertices[0].m_Pos.x = pArray[i].m_X0;
 		Quad.m_aVertices[0].m_Pos.y = pArray[i].m_Y0;
 		Quad.m_aVertices[0].m_Tex = m_aTexture[0];
-		SetColor(&Quad.m_aVertices[0], 0);
+		Quad.m_aVertices[0].m_Color = m_aColor[0];
 
 		Quad.m_aVertices[1].m_Pos.x = pArray[i].m_X1;
 		Quad.m_aVertices[1].m_Pos.y = pArray[i].m_Y1;
 		Quad.m_aVertices[1].m_Tex = m_aTexture[1];
-		SetColor(&Quad.m_aVertices[1], 1);
+		Quad.m_aVertices[1].m_Color = m_aColor[1];
 
 		Quad.m_aVertices[2].m_Pos.x = pArray[i].m_X3;
 		Quad.m_aVertices[2].m_Pos.y = pArray[i].m_Y3;
 		Quad.m_aVertices[2].m_Tex = m_aTexture[3];
-		SetColor(&Quad.m_aVertices[2], 3);
+		Quad.m_aVertices[2].m_Color = m_aColor[3];
 
 		Quad.m_aVertices[3].m_Pos.x = pArray[i].m_X2;
 		Quad.m_aVertices[3].m_Pos.y = pArray[i].m_Y2;
 		Quad.m_aVertices[3].m_Tex = m_aTexture[2];
-		SetColor(&Quad.m_aVertices[3], 2);
+		Quad.m_aVertices[3].m_Color = m_aColor[2];
 	}
 
 	if(Container.m_AutomaticUpload)
@@ -1775,11 +1790,13 @@ void CGraphics_Threaded::RenderQuadContainerEx(int ContainerIndex, int QuadOffse
 
 		WrapClamp();
 
-		float ScreenX0, ScreenY0, ScreenX1, ScreenY1;
-		GetScreen(&ScreenX0, &ScreenY0, &ScreenX1, &ScreenY1);
-		MapScreen((ScreenX0 - X) / ScaleX, (ScreenY0 - Y) / ScaleY, (ScreenX1 - X) / ScaleX, (ScreenY1 - Y) / ScaleY);
+		CScreenRect ScreenRect = GetScreen();
+		CScreenRect CommandScreenRect = ScreenRect.Move({-X, -Y});
+		CommandScreenRect.m_TopLeft /= vec2(ScaleX, ScaleY);
+		CommandScreenRect.m_BottomRight /= vec2(ScaleX, ScaleY);
 		Cmd.m_State = m_State;
-		MapScreen(ScreenX0, ScreenY0, ScreenX1, ScreenY1);
+		Cmd.m_State.m_ScreenTL = CommandScreenRect.m_TopLeft;
+		Cmd.m_State.m_ScreenBR = CommandScreenRect.m_BottomRight;
 
 		Cmd.m_DrawNum = QuadDrawNum * 6;
 		Cmd.m_pOffset = (void *)(QuadOffset * 6 * sizeof(unsigned int));
@@ -1817,8 +1834,7 @@ void CGraphics_Threaded::RenderQuadContainerEx(int ContainerIndex, int QuadOffse
 				{
 					m_aVertices[i * 6 + n].m_Pos.x *= ScaleX;
 					m_aVertices[i * 6 + n].m_Pos.y *= ScaleY;
-
-					SetColor(&m_aVertices[i * 6 + n], 0);
+					m_aVertices[i * 6 + n].m_Color = m_aColor[0];
 				}
 
 				if(m_Rotation != 0)
@@ -1847,7 +1863,7 @@ void CGraphics_Threaded::RenderQuadContainerEx(int ContainerIndex, int QuadOffse
 				{
 					m_aVertices[i * 4 + n].m_Pos.x *= ScaleX;
 					m_aVertices[i * 4 + n].m_Pos.y *= ScaleY;
-					SetColor(&m_aVertices[i * 4 + n], 0);
+					m_aVertices[i * 4 + n].m_Color = m_aColor[0];
 				}
 
 				if(m_Rotation != 0)
@@ -1976,7 +1992,7 @@ int CGraphics_Threaded::CreateBufferObject(size_t UploadDataSize, void *pUploadD
 		m_vBufferObjectIndices[Index] = Index;
 	}
 
-	dbg_assert((CreateFlags & EBufferObjectCreateFlags::BUFFER_OBJECT_CREATE_FLAGS_ONE_TIME_USE_BIT) == 0 || (UploadDataSize <= CCommandBuffer::MAX_VERTICES * maximum(sizeof(CCommandBuffer::SVertexTex3DStream), sizeof(CCommandBuffer::SVertexTex3D))),
+	dbg_assert((CreateFlags & EBufferObjectCreateFlags::BUFFER_OBJECT_CREATE_FLAGS_ONE_TIME_USE_BIT) == 0 || (UploadDataSize <= CCommandBuffer::MAX_VERTICES * std::max(sizeof(CCommandBuffer::SVertexTex3DStream), sizeof(CCommandBuffer::SVertexTex3D))),
 		"If BUFFER_OBJECT_CREATE_FLAGS_ONE_TIME_USE_BIT is used, then the buffer size must not exceed max(sizeof(CCommandBuffer::SVertexTex3DStream), sizeof(CCommandBuffer::SVertexTex3D)) * CCommandBuffer::MAX_VERTICES");
 
 	CCommandBuffer::SCommand_CreateBufferObject Cmd;
@@ -2032,7 +2048,7 @@ void CGraphics_Threaded::RecreateBufferObject(int BufferIndex, size_t UploadData
 	Cmd.m_DeletePointer = IsMovedPointer;
 	Cmd.m_Flags = CreateFlags;
 
-	dbg_assert((CreateFlags & EBufferObjectCreateFlags::BUFFER_OBJECT_CREATE_FLAGS_ONE_TIME_USE_BIT) == 0 || (UploadDataSize <= CCommandBuffer::MAX_VERTICES * maximum(sizeof(CCommandBuffer::SVertexTex3DStream), sizeof(CCommandBuffer::SVertexTex3D))),
+	dbg_assert((CreateFlags & EBufferObjectCreateFlags::BUFFER_OBJECT_CREATE_FLAGS_ONE_TIME_USE_BIT) == 0 || (UploadDataSize <= CCommandBuffer::MAX_VERTICES * std::max(sizeof(CCommandBuffer::SVertexTex3DStream), sizeof(CCommandBuffer::SVertexTex3D))),
 		"If BUFFER_OBJECT_CREATE_FLAGS_ONE_TIME_USE_BIT is used, then the buffer size must not exceed max(sizeof(CCommandBuffer::SVertexTex3DStream), sizeof(CCommandBuffer::SVertexTex3D)) * CCommandBuffer::MAX_VERTICES");
 
 	if(IsMovedPointer)
@@ -2247,7 +2263,9 @@ int CGraphics_Threaded::IssueInit()
 		Flags |= IGraphicsBackend::INITFLAG_VSYNC;
 	}
 
-	const int Result = m_pBackend->Init("DDNet Client", &g_Config.m_GfxScreen, &g_Config.m_GfxScreenWidth, &g_Config.m_GfxScreenHeight, &g_Config.m_GfxScreenRefreshRate, &g_Config.m_GfxFsaaSamples, Flags, &g_Config.m_GfxDesktopWidth, &g_Config.m_GfxDesktopHeight, &m_ScreenWidth, &m_ScreenHeight, m_pStorage);
+	const int Result = m_pBackend->Init("BestClient", &g_Config.m_GfxScreen, &g_Config.m_GfxScreenWidth, &g_Config.m_GfxScreenHeight, &g_Config.m_GfxScreenRefreshRate, &g_Config.m_GfxFsaaSamples, Flags, &m_DesktopSize.x, &m_DesktopSize.y, &m_ScreenWidth, &m_ScreenHeight, m_pStorage); // bestclient
+	m_DrawableWidth = m_ScreenWidth;
+	m_DrawableHeight = m_ScreenHeight;
 	AddBackEndWarningIfExists();
 	if(Result == 0)
 	{
@@ -2266,16 +2284,24 @@ int CGraphics_Threaded::IssueInit()
 
 // TClient
 bool g_GraphicsForcedAspect = true;
-int g_GraphicsCustomAspect = -1;
 
-static int GetEffectiveCustomAspect(bool ApplyCustomAspect)
+// bestclient
+static int s_GraphicsCustomAspect = -1;
+
+static void ResolveCustomAspect(bool ApplyCustomAspect, int &CustomAspect, float &CustomAspectF)
 {
+	CustomAspect = 0;
+	CustomAspectF = 0.0f;
 	if(!ApplyCustomAspect)
-		return 0;
+		return;
 	const int AspectMode = g_Config.m_BcCustomAspectRatioMode >= 0 ? g_Config.m_BcCustomAspectRatioMode : (g_Config.m_BcCustomAspectRatio > 0 ? 1 : 0);
-	if(AspectMode <= 0)
-		return 0;
-	return g_Config.m_BcCustomAspectRatio >= 100 ? g_Config.m_BcCustomAspectRatio : 0;
+	if(AspectMode <= 0 || g_Config.m_BcCustomAspectRatio < 100)
+		return;
+	CustomAspect = g_Config.m_BcCustomAspectRatio;
+	if(AspectMode == 2 && g_Config.m_BcCustomAspectRatioNum > 0 && g_Config.m_BcCustomAspectRatioDen > 0)
+		CustomAspectF = (float)g_Config.m_BcCustomAspectRatioNum / (float)g_Config.m_BcCustomAspectRatioDen;
+	else
+		CustomAspectF = CustomAspect / 100.0f;
 }
 
 void CGraphics_Threaded::SetScreenAspectOverrideEnabled(bool Enabled)
@@ -2283,31 +2309,46 @@ void CGraphics_Threaded::SetScreenAspectOverrideEnabled(bool Enabled)
 	m_ScreenAspectOverrideEnabled = Enabled;
 }
 
+void CGraphics_Threaded::PushPreviewViewport(int X, int Y, int W, int H)
+{
+	dbg_assert(!m_PreviewViewportPushed, "preview viewport already pushed");
+	dbg_assert(W > 0 && H > 0, "invalid preview viewport");
+	m_PreviewViewportPushed = true;
+	m_PreviewSavedAspectOverride = m_ScreenAspectOverride;
+	m_PreviewSavedAspectOverrideEnabled = m_ScreenAspectOverrideEnabled;
+	m_ScreenAspectOverride = (float)W / (float)H;
+	m_ScreenAspectOverrideEnabled = true;
+	UpdateViewport(X, Y, W, H, false);
+}
+
+void CGraphics_Threaded::PopPreviewViewport()
+{
+	dbg_assert(m_PreviewViewportPushed, "preview viewport not pushed");
+	m_PreviewViewportPushed = false;
+	m_ScreenAspectOverride = m_PreviewSavedAspectOverride;
+	m_ScreenAspectOverrideEnabled = m_PreviewSavedAspectOverrideEnabled;
+	UpdateViewport(m_ViewportX, 0, m_ScreenWidth, m_ScreenHeight, false);
+}
+// bestclient
+
 void CGraphics_Threaded::SetForcedAspect(bool Force, bool ApplyCustomAspect)
 {
 	if(!IsBackendInitialized())
 		return;
-	const int CustomAspect = GetEffectiveCustomAspect(ApplyCustomAspect);
-	// Use the exact numerator/denominator the user set for the actual aspect, so the
-	// applied ratio matches their input precisely instead of the x100-rounded value.
-	float CustomAspectF = 0.0f;
-	if(CustomAspect >= 100)
-	{
-		const int AspectMode = g_Config.m_BcCustomAspectRatioMode >= 0 ? g_Config.m_BcCustomAspectRatioMode : (g_Config.m_BcCustomAspectRatio > 0 ? 1 : 0);
-		if(AspectMode == 2 && g_Config.m_BcCustomAspectRatioNum > 0 && g_Config.m_BcCustomAspectRatioDen > 0)
-			CustomAspectF = (float)g_Config.m_BcCustomAspectRatioNum / (float)g_Config.m_BcCustomAspectRatioDen;
-		else
-			CustomAspectF = CustomAspect / 100.0f;
-	}
-	if(g_GraphicsForcedAspect == Force && g_GraphicsCustomAspect == CustomAspect && m_ScreenAspectOverride == CustomAspectF)
+	// bestclient
+	int CustomAspect;
+	float CustomAspectF;
+	ResolveCustomAspect(ApplyCustomAspect, CustomAspect, CustomAspectF);
+	if(g_GraphicsForcedAspect == Force && s_GraphicsCustomAspect == CustomAspect && m_ScreenAspectOverride == CustomAspectF)
 		return;
 
 	g_GraphicsForcedAspect = Force;
-	g_GraphicsCustomAspect = CustomAspect;
+	s_GraphicsCustomAspect = CustomAspect;
 	m_ScreenAspectOverride = CustomAspectF;
+	// bestclient
 	m_pBackend->GetViewportSize(m_ScreenWidth, m_ScreenHeight);
 	AdjustViewport(false);
-	UpdateViewport(0, 0, m_ScreenWidth, m_ScreenHeight, false);
+	UpdateViewport(m_ViewportX, 0, m_ScreenWidth, m_ScreenHeight, false);
 
 	// kick the command buffer and wait
 	KickCommandBuffer();
@@ -2319,28 +2360,33 @@ void CGraphics_Threaded::SetForcedAspect(bool Force, bool ApplyCustomAspect)
 
 void CGraphics_Threaded::AdjustViewport(bool SendViewportChangeToBackend)
 {
+	// exclude the area covered by the display cutout, as nothing rendered there is visible
+	int InsetLeft, InsetRight;
+	m_pBackend->GetDisplayCutoutInsets(InsetLeft, InsetRight);
+	m_ViewportX = InsetLeft;
+	m_ScreenWidth = m_DrawableWidth - InsetLeft - InsetRight;
+
 	// adjust the viewport to only allow certain aspect ratios
 	// keep this in sync with backend_vulkan GetSwapImageSize's check
-	// custom aspect is logical (ScreenAspect override), so keep full render resolution.
-	if(g_GraphicsCustomAspect >= 100)
+	// bestclient
+	if(s_GraphicsCustomAspect >= 100)
 	{
 		m_IsForcedViewport = false;
-		return;
 	}
-
-	if(m_ScreenHeight > 4 * m_ScreenWidth / 5 && g_GraphicsForcedAspect)
+	else if(m_ScreenHeight > 4 * m_ScreenWidth / 5 && g_GraphicsForcedAspect)
+	// bestclient
 	{
 		m_IsForcedViewport = true;
 		m_ScreenHeight = 4 * m_ScreenWidth / 5;
-
-		if(SendViewportChangeToBackend)
-		{
-			UpdateViewport(0, 0, m_ScreenWidth, m_ScreenHeight, true);
-		}
 	}
 	else
 	{
 		m_IsForcedViewport = false;
+	}
+
+	if(SendViewportChangeToBackend && (m_ScreenWidth != m_DrawableWidth || m_ScreenHeight != m_DrawableHeight))
+	{
+		UpdateViewport(m_ViewportX, 0, m_ScreenWidth, m_ScreenHeight, true);
 	}
 }
 
@@ -2351,6 +2397,8 @@ void CGraphics_Threaded::UpdateViewport(int X, int Y, int W, int H, bool ByResiz
 	Cmd.m_Y = Y;
 	Cmd.m_Width = W;
 	Cmd.m_Height = H;
+	Cmd.m_DrawableWidth = m_DrawableWidth;
+	Cmd.m_DrawableHeight = m_DrawableHeight;
 	Cmd.m_ByResize = ByResize;
 	AddCmd(Cmd);
 }
@@ -2558,9 +2606,8 @@ int CGraphics_Threaded::Init()
 		NullTextureInfo.m_Height = NullTextureDimension;
 		NullTextureInfo.m_Format = CImageInfo::FORMAT_RGBA;
 		NullTextureInfo.m_pData = aNullTextureData;
-		const int TextureLoadFlags = Uses2DTextureArrays() ? IGraphics::TEXLOAD_TO_2D_ARRAY_TEXTURE : IGraphics::TEXLOAD_TO_3D_TEXTURE;
 		m_NullTexture.Invalidate();
-		m_NullTexture = LoadTextureRaw(NullTextureInfo, TextureLoadFlags, "null-texture");
+		m_NullTexture = LoadTextureRaw(NullTextureInfo, TextureLoadFlags(), "null-texture");
 		dbg_assert(m_NullTexture.IsNullTexture(), "Null texture invalid");
 	}
 
@@ -2616,7 +2663,7 @@ void CGraphics_Threaded::SetWindowParams(int FullscreenMode, bool IsBorderless)
 
 	m_pBackend->SetWindowParams(g_Config.m_GfxFullscreen, g_Config.m_GfxBorderless);
 	CVideoMode CurMode;
-	m_pBackend->GetCurrentVideoMode(CurMode, m_ScreenHiDPIScale, g_Config.m_GfxDesktopWidth, g_Config.m_GfxDesktopHeight, g_Config.m_GfxScreen);
+	m_pBackend->GetCurrentVideoMode(CurMode, m_ScreenHiDPIScale, m_DesktopSize.x, m_DesktopSize.y, g_Config.m_GfxScreen);
 	GotResized(CurMode.m_WindowWidth, CurMode.m_WindowHeight, CurMode.m_RefreshRate);
 
 	for(auto &PropChangedListener : m_vPropChangeListeners)
@@ -2625,7 +2672,7 @@ void CGraphics_Threaded::SetWindowParams(int FullscreenMode, bool IsBorderless)
 
 bool CGraphics_Threaded::SetWindowScreen(int Index, bool MoveToCenter)
 {
-	if(!m_pBackend->SetWindowScreen(Index, MoveToCenter))
+	if(!m_pBackend->SetWindowScreen(Index, MoveToCenter, &m_DesktopSize))
 	{
 		return false;
 	}
@@ -2663,7 +2710,6 @@ bool CGraphics_Threaded::SwitchWindowScreen(int Index, bool MoveToCenter)
 		CVideoMode CurMode;
 		GetCurrentVideoMode(CurMode, Index);
 
-		g_Config.m_GfxColorDepth = CurMode.m_Red + CurMode.m_Green + CurMode.m_Blue > 16 ? 24 : 16;
 		g_Config.m_GfxScreenWidth = CurMode.m_WindowWidth;
 		g_Config.m_GfxScreenHeight = CurMode.m_WindowHeight;
 		g_Config.m_GfxScreenRefreshRate = CurMode.m_RefreshRate;
@@ -2684,13 +2730,21 @@ void CGraphics_Threaded::Move(int x, int y)
 
 	// Only handling CurScreen != m_GfxScreen doesn't work reliably
 	const int CurScreen = m_pBackend->GetWindowScreen();
-	m_pBackend->UpdateDisplayMode(CurScreen);
+	if(!m_pBackend->UpdateDisplayMode(CurScreen, &m_DesktopSize))
+		return;
 
 	// send a got resized event so that the current canvas size is requested
 	GotResized(g_Config.m_GfxScreenWidth, g_Config.m_GfxScreenHeight, g_Config.m_GfxScreenRefreshRate);
 
 	for(auto &PropChangedListener : m_vPropChangeListeners)
 		PropChangedListener();
+}
+
+void CGraphics_Threaded::SetScreenSize(int Width, int Height)
+{
+	m_ScreenWidth = Width;
+	m_ScreenHeight = Height;
+	UpdateViewport(0, 0, m_ScreenWidth, m_ScreenHeight, true);
 }
 
 bool CGraphics_Threaded::Resize(int w, int h, int RefreshRate)
@@ -2707,7 +2761,7 @@ bool CGraphics_Threaded::Resize(int w, int h, int RefreshRate)
 	if(m_pBackend->ResizeWindow(w, h, RefreshRate))
 	{
 		CVideoMode CurMode;
-		m_pBackend->GetCurrentVideoMode(CurMode, m_ScreenHiDPIScale, g_Config.m_GfxDesktopWidth, g_Config.m_GfxDesktopHeight, g_Config.m_GfxScreen);
+		m_pBackend->GetCurrentVideoMode(CurMode, m_ScreenHiDPIScale, m_DesktopSize.x, m_DesktopSize.y, g_Config.m_GfxScreen);
 		GotResized(w, h, RefreshRate);
 		return true;
 	}
@@ -2740,6 +2794,8 @@ void CGraphics_Threaded::GotResized(int w, int h, int RefreshRate)
 	auto PrevCanvasWidth = m_ScreenWidth;
 	auto PrevCanvasHeight = m_ScreenHeight;
 	m_pBackend->GetViewportSize(m_ScreenWidth, m_ScreenHeight);
+	m_DrawableWidth = m_ScreenWidth;
+	m_DrawableHeight = m_ScreenHeight;
 
 	AdjustViewport(false);
 
@@ -2750,7 +2806,7 @@ void CGraphics_Threaded::GotResized(int w, int h, int RefreshRate)
 	g_Config.m_GfxScreenRefreshRate = m_ScreenRefreshRate;
 
 	auto OldDpi = m_ScreenHiDPIScale;
-	m_ScreenHiDPIScale = m_ScreenWidth / (float)g_Config.m_GfxScreenWidth;
+	m_ScreenHiDPIScale = m_DrawableWidth / (float)g_Config.m_GfxScreenWidth;
 
 	// A DPI change must notify the listeners, since e.g. video modes
 	// currently depend on it.
@@ -2760,7 +2816,7 @@ void CGraphics_Threaded::GotResized(int w, int h, int RefreshRate)
 			PropChangedListener();
 	}
 
-	UpdateViewport(0, 0, m_ScreenWidth, m_ScreenHeight, true);
+	UpdateViewport(m_ViewportX, 0, m_ScreenWidth, m_ScreenHeight, true);
 
 	// kick the command buffer and wait
 	KickCommandBuffer();
@@ -2880,8 +2936,30 @@ void CGraphics_Threaded::TakeCustomScreenshot(const char *pFilename)
 	m_DoScreenshot = true;
 }
 
+void CGraphics_Threaded::ReadFramebuffer(CImageInfo &Image)
+{
+	CCommandBuffer::SCommand_TrySwapAndScreenshot Cmd;
+	Cmd.m_pImage = &Image;
+	bool Swapped = false;
+	Cmd.m_pSwapped = &Swapped;
+	AddCmd(Cmd);
+	KickCommandBuffer();
+	WaitForIdle();
+}
+
 void CGraphics_Threaded::Swap()
 {
+#if defined(CONF_PLATFORM_IOS)
+	// Rotating the device by 180 degrees moves the cutout to the other side without
+	// changing the window size, which would not cause a resize event.
+	int InsetLeft, InsetRight;
+	m_pBackend->GetDisplayCutoutInsets(InsetLeft, InsetRight);
+	if(InsetLeft != m_ViewportX || m_DrawableWidth - InsetLeft - InsetRight != m_ScreenWidth)
+	{
+		GotResized(g_Config.m_GfxScreenWidth, g_Config.m_GfxScreenHeight, -1);
+	}
+#endif
+
 	bool Swapped = false;
 	ScreenshotDirect(&Swapped);
 	ReadPixelDirect(&Swapped);
@@ -2893,19 +2971,12 @@ void CGraphics_Threaded::Swap()
 	}
 
 	KickCommandBuffer();
-	// TODO: Remove when https://github.com/libsdl-org/SDL/issues/5203 is fixed
-#ifdef CONF_PLATFORM_MACOS
-	if(str_find(GetVersionString(), "Metal"))
-		WaitForIdle();
-#endif
 }
 
 bool CGraphics_Threaded::SetVSync(bool State)
 {
 	if(!m_pCommandBuffer)
 		return true;
-
-	const bool OldState = State;
 
 	// add vsync command
 	bool RetOk = false;
@@ -2918,7 +2989,10 @@ bool CGraphics_Threaded::SetVSync(bool State)
 	KickCommandBuffer();
 	WaitForIdle();
 
-	g_Config.m_GfxVsync = RetOk ? State : OldState;
+	if(RetOk)
+	{
+		g_Config.m_GfxVsync = State;
+	}
 	return RetOk;
 }
 
@@ -3010,6 +3084,11 @@ const char *CGraphics_Threaded::GetRendererString()
 	return m_pBackend->GetRendererString();
 }
 
+const char *CGraphics_Threaded::GetFatalError() const
+{
+	return m_pBackend == nullptr ? "" : m_pBackend->GetFatalError();
+}
+
 TGLBackendReadPresentedImageData &CGraphics_Threaded::GetReadPresentedImageDataFuncUnsafe()
 {
 	return m_pBackend->GetReadPresentedImageDataFuncUnsafe();
@@ -3019,19 +3098,19 @@ int CGraphics_Threaded::GetVideoModes(CVideoMode *pModes, int MaxModes, int Scre
 {
 	if(g_Config.m_GfxDisplayAllVideoModes)
 	{
-		const int Count = minimum<size_t>(std::size(g_aFakeModes), MaxModes);
+		const int Count = std::min(std::size(g_aFakeModes), (size_t)MaxModes);
 		mem_copy(pModes, g_aFakeModes, Count * sizeof(CVideoMode));
 		return Count;
 	}
 
 	int NumModes = 0;
-	m_pBackend->GetVideoModes(pModes, MaxModes, &NumModes, m_ScreenHiDPIScale, g_Config.m_GfxDesktopWidth, g_Config.m_GfxDesktopHeight, Screen);
+	m_pBackend->GetVideoModes(pModes, MaxModes, &NumModes, m_ScreenHiDPIScale, m_DesktopSize.x, m_DesktopSize.y, Screen);
 	return NumModes;
 }
 
 void CGraphics_Threaded::GetCurrentVideoMode(CVideoMode &CurMode, int Screen)
 {
-	m_pBackend->GetCurrentVideoMode(CurMode, m_ScreenHiDPIScale, g_Config.m_GfxDesktopWidth, g_Config.m_GfxDesktopHeight, Screen);
+	m_pBackend->GetCurrentVideoMode(CurMode, m_ScreenHiDPIScale, m_DesktopSize.x, m_DesktopSize.y, Screen);
 }
 
 extern IEngineGraphics *CreateEngineGraphicsThreaded()

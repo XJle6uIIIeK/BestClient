@@ -292,21 +292,15 @@ public:
 	/**
 	 * Called with all current touch finger states.
 	 *
-	 * @param vTouchFingerStates The touch finger states to be handled.
+	 * @param vTouchFingerStates The touch finger states to be handled. The component may remove
+	 * fingers from the vector which following components in the input order should not handle.
+	 * A component that returns `true` must clear the vector.
 	 *
 	 * @return `true` if the component used the touch events, `false` otherwise.
 	 */
-	virtual bool OnTouchState(const std::vector<IInput::CTouchFingerState> &vTouchFingerStates)
+	virtual bool OnTouchState(std::vector<IInput::CTouchFingerState> &vTouchFingerStates)
 	{
 		return false;
-	}
-
-	/**
-	 * Called when the current focus of the window changes, for example when the user alt-tabs out of the game.
-	 * @param Focused `true` if the window is now focused, `false` if it lost focus.
-	 */
-	virtual void OnFocusChange(bool Focused)
-	{
 	}
 };
 

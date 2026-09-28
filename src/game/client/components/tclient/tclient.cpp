@@ -15,7 +15,9 @@
 #include <generated/client_data.h>
 
 #include <game/client/animstate.h>
+#include <game/client/components/bestclient/bestclient.h> // bestclient
 #include <game/client/components/chat.h>
+#include <game/client/components/hud_layout.h> // bestclient
 #include <game/client/gameclient.h>
 #include <game/client/render.h>
 #include <game/client/ui.h>
@@ -100,7 +102,9 @@ void CTClient::ConchainRandomColor(IConsole::IResult *pResult, void *pUserData, 
 
 void CTClient::OnInit()
 {
-	TextRender()->SetCustomFace(g_Config.m_TcCustomFont);
+	// bestclient
+	BestClientApplyMenuFont(TextRender());
+	// bestclient
 	m_pGraphics = Kernel()->RequestInterface<IEngineGraphics>();
 	FetchTClientInfo();
 
@@ -186,6 +190,19 @@ void CTClient::OnMessage(int MsgType, void *pRawMsg)
 			return;
 		}
 
+		// bestclient
+		if(g_Config.m_ClFocusMode && g_Config.m_ClFocusModeHideChat && g_Config.m_ClFocusModeAutoReply)
+		{
+			char aBuf[256];
+			if(pMsg->m_Team == TEAM_WHISPER_RECV || ServerCommandExists("w"))
+				str_format(aBuf, sizeof(aBuf), "/w %s %s", aPlayerName, g_Config.m_ClFocusModeAutoReplyMessage);
+			else
+				str_format(aBuf, sizeof(aBuf), "%s: %s", aPlayerName, g_Config.m_ClFocusModeAutoReplyMessage);
+			SendNonDuplicateMessage(0, aBuf);
+			return;
+		}
+		// bestclient
+
 		bool WindowActive = m_pGraphics && m_pGraphics->WindowActive();
 		if(g_Config.m_TcAutoReplyMinimized && !WindowActive && m_pGraphics)
 		{
@@ -210,8 +227,8 @@ void CTClient::OnMessage(int MsgType, void *pRawMsg)
 			char aReason[VOTE_REASON_LENGTH];
 			str_copy(aDescription, pMsg->m_pDescription);
 			str_copy(aReason, pMsg->m_pReason);
-			bool KickVote = str_startswith(aDescription, "Kick ") != 0 ? true : false;
-			bool SpecVote = str_startswith(aDescription, "Pause ") != 0 ? true : false;
+			bool KickVote = str_startswith(aDescription, "Kick ") != nullptr ? true : false;
+			bool SpecVote = str_startswith(aDescription, "Pause ") != nullptr ? true : false;
 			bool SettingVote = !KickVote && !SpecVote;
 			bool RandomMapVote = SettingVote && str_find_nocase(aDescription, "random");
 			bool MapCoolDown = SettingVote && (str_find_nocase(aDescription, "change map") || str_find_nocase(aDescription, "no not change map"));
@@ -422,7 +439,7 @@ void CTClient::OnConsoleInit()
 	Console()->Register("emote_cycle", "", CFGFLAG_CLIENT, ConEmoteCycle, this, "Cycle through emotes");
 
 	Console()->Chain(
-		"tc_allow_any_resolution", [](IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData) {
+		"tc_allow_any_res", [](IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData) {
 			pfnCallback(pResult, pCallbackUserData);
 			((CTClient *)pUserData)->SetForcedAspect();
 		},
@@ -548,8 +565,6 @@ bool CTClient::ServerCommandExists(const char *pCommand)
 
 void CTClient::OnRender()
 {
-	SetForcedAspect();
-
 	if(m_pTClientInfoTask)
 	{
 		if(m_pTClientInfoTask->State() == EHttpState::DONE)
@@ -572,7 +587,7 @@ void CTClient::ResetTClientInfoTask()
 	if(m_pTClientInfoTask)
 	{
 		m_pTClientInfoTask->Abort();
-		m_pTClientInfoTask = NULL;
+		m_pTClientInfoTask = nullptr;
 	}
 }
 
@@ -602,7 +617,7 @@ static TVersion ToTCVersion(char *pStr)
 			return gs_InvalidTCVersion;
 
 		aVersion[i] = str_toint(p);
-		p = strtok(NULL, ".");
+		p = strtok(nullptr, ".");
 	}
 
 	if(p)
@@ -651,10 +666,11 @@ void CTClient::SetForcedAspect()
 		Force = false;
 	else if(State == CClient::EClientState::STATE_ONLINE && GameClient()->m_GameInfo.m_AllowZoom && !GameClient()->m_Menus.IsActive())
 		Force = false;
+	// bestclient
 	const bool IsActiveGameplay = State == CClient::EClientState::STATE_ONLINE || State == CClient::EClientState::STATE_DEMOPLAYBACK;
-	const bool AspectBlocked = GameClient()->IsAspectRatioBlockedByFng();
-	const bool ApplyCustomAspect = !AspectBlocked && (g_Config.m_BcCustomAspectRatioApplyMode == 1 || IsActiveGameplay);
+	const bool ApplyCustomAspect = GameClient()->m_AspectRatio.ShouldApplyCustomAspect(IsActiveGameplay);
 	Graphics()->SetForcedAspect(Force, ApplyCustomAspect);
+	// bestclient
 }
 
 void CTClient::OnStateChange(int OldState, int NewState)
@@ -667,7 +683,6 @@ void CTClient::OnStateChange(int OldState, int NewState)
 void CTClient::OnNewSnapshot()
 {
 	SetForcedAspect();
-
 	// Update volleyball
 	bool IsVolleyBall = false;
 	if(g_Config.m_TcVolleyBallBetterBall > 0 && g_Config.m_TcVolleyBallBetterBallSkin[0] != '\0')
@@ -755,11 +770,19 @@ static void StripStr(const char *pIn, char *pOut, const char *pEnd)
 		*pOut = '\0';
 }
 
-void CTClient::RenderMiniVoteHud()
+void CTClient::RenderMiniVoteHud(bool Preview)
 {
-	CUIRect View = {0.0f, 60.0f, 70.0f, 35.0f};
-	View.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.4f), IGraphics::CORNER_R, 3.0f);
-	View.Margin(3.0f, &View);
+	// bestclient
+	const float HudHeight = 300.0f;
+	const float HudWidth = HudHeight * Graphics()->ScreenAspect();
+	CUIRect View = GameClient()->m_Voting.GetHudRect(HudWidth, HudHeight, Preview);
+	if(View.w <= 0.0f || View.h <= 0.0f)
+		return;
+	const float Scale = View.h / 35.0f;
+	const float ModuleAlpha = HudLayout::AlphaFactor(HudLayout::MODULE_VOTES);
+	const int Corners = HudLayout::BackgroundCorners(IGraphics::CORNER_ALL, View.x, View.y, View.w, View.h, HudWidth, HudHeight);
+	View.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.4f * ModuleAlpha), Corners, 3.0f * Scale);
+	View.Margin(3.0f * Scale, &View);
 
 	SLabelProperties Props;
 	Props.m_EllipsisAtEnd = true;
@@ -768,50 +791,62 @@ void CTClient::RenderMiniVoteHud()
 	CUIRect Row, LeftColumn, RightColumn, ProgressSpinner;
 	char aBuf[256];
 
-	// Vote description
-	View.HSplitTop(6.0f, &Row, &View);
-	StripStr(GameClient()->m_Voting.VoteDescription(), aBuf, aBuf + sizeof(aBuf));
-	Ui()->DoLabel(&Row, aBuf, 6.0f, TEXTALIGN_ML, Props);
+	View.HSplitTop(6.0f * Scale, &Row, &View);
+	if(Preview)
+		str_format(aBuf, sizeof(aBuf), "%s", Localize("Change map to Kobra 3"));
+	else
+		StripStr(GameClient()->m_Voting.VoteDescription(), aBuf, aBuf + sizeof(aBuf));
+	Ui()->DoLabel(&Row, aBuf, 6.0f * Scale, TEXTALIGN_ML, Props);
 
-	// Vote reason
-	View.HSplitTop(3.0f, nullptr, &View);
-	View.HSplitTop(4.0f, &Row, &View);
-	Ui()->DoLabel(&Row, GameClient()->m_Voting.VoteReason(), 4.0f, TEXTALIGN_ML, Props);
+	View.HSplitTop(3.0f * Scale, nullptr, &View);
+	View.HSplitTop(4.0f * Scale, &Row, &View);
+	if(Preview)
+		str_format(aBuf, sizeof(aBuf), "%s", Localize("Editor preview"));
+	else
+		str_format(aBuf, sizeof(aBuf), "%s", GameClient()->m_Voting.VoteReason());
+	Ui()->DoLabel(&Row, aBuf, 4.0f * Scale, TEXTALIGN_ML, Props);
 
-	// Time left
-	str_format(aBuf, sizeof(aBuf), Localize("%ds left"), GameClient()->m_Voting.SecondsLeft());
-	View.HSplitTop(3.0f, nullptr, &View);
-	View.HSplitTop(3.0f, &Row, &View);
-	Row.VSplitLeft(2.0f, nullptr, &Row);
-	Row.VSplitLeft(3.0f, &ProgressSpinner, &Row);
-	Row.VSplitLeft(2.0f, nullptr, &Row);
+	if(Preview)
+		str_format(aBuf, sizeof(aBuf), Localize("%ds left"), 12);
+	else
+		str_format(aBuf, sizeof(aBuf), Localize("%ds left"), GameClient()->m_Voting.SecondsLeft());
+	View.HSplitTop(3.0f * Scale, nullptr, &View);
+	View.HSplitTop(3.0f * Scale, &Row, &View);
+	Row.VSplitLeft(2.0f * Scale, nullptr, &Row);
+	Row.VSplitLeft(3.0f * Scale, &ProgressSpinner, &Row);
+	Row.VSplitLeft(2.0f * Scale, nullptr, &Row);
 
 	SProgressSpinnerProperties ProgressProps;
-	ProgressProps.m_Progress = std::clamp((time() - GameClient()->m_Voting.m_Opentime) / (float)(GameClient()->m_Voting.m_Closetime - GameClient()->m_Voting.m_Opentime), 0.0f, 1.0f);
+	ProgressProps.m_Progress = 0.33f;
+	if(!Preview)
+	{
+		const int64_t Duration = GameClient()->m_Voting.m_Closetime - GameClient()->m_Voting.m_Opentime;
+		if(Duration > 0)
+			ProgressProps.m_Progress = std::clamp((time() - GameClient()->m_Voting.m_Opentime) / (float)Duration, 0.0f, 1.0f);
+	}
 	Ui()->RenderProgressSpinner(ProgressSpinner.Center(), ProgressSpinner.h / 2.0f, ProgressProps);
 
-	Ui()->DoLabel(&Row, aBuf, 3.0f, TEXTALIGN_ML);
+	Ui()->DoLabel(&Row, aBuf, 3.0f * Scale, TEXTALIGN_ML);
 
-	// Bars
-	View.HSplitTop(3.0f, nullptr, &View);
-	View.HSplitTop(3.0f, &Row, &View);
+	View.HSplitTop(3.0f * Scale, nullptr, &View);
+	View.HSplitTop(3.0f * Scale, &Row, &View);
 	GameClient()->m_Voting.RenderBars(Row);
 
-	// F3 / F4
-	View.HSplitTop(3.0f, nullptr, &View);
-	View.HSplitTop(0.5f, &Row, &View);
-	Row.VSplitMid(&LeftColumn, &RightColumn, 4.0f);
+	View.HSplitTop(3.0f * Scale, nullptr, &View);
+	View.HSplitTop(0.5f * Scale, &Row, &View);
+	Row.VSplitMid(&LeftColumn, &RightColumn, 4.0f * Scale);
 
 	char aKey[64];
 	GameClient()->m_Binds.GetKey("vote yes", aKey, sizeof(aKey));
 	TextRender()->TextColor(GameClient()->m_Voting.TakenChoice() == 1 ? ColorRGBA(0.2f, 0.9f, 0.2f, 0.85f) : TextRender()->DefaultTextColor());
-	Ui()->DoLabel(&LeftColumn, aKey[0] == '\0' ? "yes" : aKey, 0.5f, TEXTALIGN_ML);
+	Ui()->DoLabel(&LeftColumn, aKey[0] == '\0' ? "yes" : aKey, 0.5f * Scale, TEXTALIGN_ML);
 
 	GameClient()->m_Binds.GetKey("vote no", aKey, sizeof(aKey));
 	TextRender()->TextColor(GameClient()->m_Voting.TakenChoice() == -1 ? ColorRGBA(0.95f, 0.25f, 0.25f, 0.85f) : TextRender()->DefaultTextColor());
-	Ui()->DoLabel(&RightColumn, aKey[0] == '\0' ? "no" : aKey, 0.5f, TEXTALIGN_MR);
+	Ui()->DoLabel(&RightColumn, aKey[0] == '\0' ? "no" : aKey, 0.5f * Scale, TEXTALIGN_MR);
 
 	TextRender()->TextColor(TextRender()->DefaultTextColor());
+	// bestclient
 }
 
 void CTClient::RenderCenterLines()
@@ -824,17 +859,15 @@ void CTClient::RenderCenterLines()
 
 	Graphics()->TextureClear();
 
-	float X0, Y0, X1, Y1;
-	Graphics()->GetScreen(&X0, &Y0, &X1, &Y1);
-	const float XMid = (X0 + X1) / 2.0f;
-	const float YMid = (Y0 + Y1) / 2.0f;
+	const CScreenRect ScreenRect = Graphics()->GetScreen();
+	const auto ScreenMid = (ScreenRect.m_BottomRight + ScreenRect.m_TopLeft) / 2.0f;
 
 	if(g_Config.m_TcShowCenterWidth == 0)
 	{
 		Graphics()->LinesBegin();
 		IGraphics::CLineItem aLines[2] = {
-			{XMid, Y0, XMid, Y1},
-			{X0, YMid, X1, YMid}};
+			{ScreenMid.x, ScreenRect.m_TopLeft.y, ScreenMid.x, ScreenRect.m_BottomRight.y},
+			{ScreenRect.m_TopLeft.x, ScreenMid.y, ScreenRect.m_BottomRight.x, ScreenMid.y}};
 		Graphics()->SetColor(color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcShowCenterColor, true)));
 		Graphics()->LinesDraw(aLines, std::size(aLines));
 		Graphics()->LinesEnd();
@@ -842,11 +875,15 @@ void CTClient::RenderCenterLines()
 	else
 	{
 		const float W = g_Config.m_TcShowCenterWidth;
+		const float X0 = ScreenRect.m_TopLeft.x;
+		const float Y0 = ScreenRect.m_TopLeft.y;
+		const float X1 = ScreenRect.m_BottomRight.x;
+		const float Y1 = ScreenRect.m_BottomRight.y;
 		Graphics()->QuadsBegin();
 		IGraphics::CQuadItem aQuads[3] = {
-			{XMid, mix(Y0, Y1, 0.25f) - W / 4.0f, W, (Y1 - Y0 - W) / 2.0f},
-			{XMid, mix(Y0, Y1, 0.75f) + W / 4.0f, W, (Y1 - Y0 - W) / 2.0f},
-			{XMid, YMid, X1 - X0, W}};
+			{ScreenMid.x, mix(Y0, Y1, 0.25f) - W / 4.0f, W, (Y1 - Y0 - W) / 2.0f},
+			{ScreenMid.x, mix(Y0, Y1, 0.75f) + W / 4.0f, W, (Y1 - Y0 - W) / 2.0f},
+			{ScreenMid.x, ScreenMid.y, X1 - X0, W}};
 		Graphics()->SetColor(color_cast<ColorRGBA>(ColorHSLA(g_Config.m_TcShowCenterColor, true)));
 		Graphics()->QuadsDraw(aQuads, std::size(aQuads));
 		Graphics()->QuadsEnd();

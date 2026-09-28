@@ -43,9 +43,6 @@ X-AROACE
 X-BI
 == -206
 
-X-HETERO
-== -207
-
 ##### other #####
 
 X-TOTAR

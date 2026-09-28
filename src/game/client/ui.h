@@ -76,7 +76,7 @@ private:
 public:
 	CLogarithmicScrollbarScale(int MinAdjustment)
 	{
-		m_MinAdjustment = maximum(MinAdjustment, 1); // must be at least 1 to support Min == 0 with logarithm
+		m_MinAdjustment = std::max(MinAdjustment, 1); // must be at least 1 to support Min == 0 with logarithm
 	}
 	float ToRelative(int AbsoluteValue, int Min, int Max) const override
 	{
@@ -178,12 +178,13 @@ public:
 		ColorRGBA m_TextColor;
 		ColorRGBA m_TextOutlineColor;
 
-		// BestClient: invalidate streamed text when gradient-everything animation advances
-		int m_GradientPhaseBucket;
-
 		SUIElementRect();
 
 		ColorRGBA m_QuadColor;
+
+		// bestclient
+		int m_GradientPhaseBucket = -1;
+		// bestclient
 
 		void Reset();
 		void Draw(const CUIRect *pRect, ColorRGBA Color, int Corners, float Rounding);
@@ -301,8 +302,45 @@ struct SPopupMenuProperties
 	int m_Corners = IGraphics::CORNER_ALL;
 	ColorRGBA m_BorderColor = ColorRGBA(0.5f, 0.5f, 0.5f, 0.75f);
 	ColorRGBA m_BackgroundColor = ColorRGBA(0.0f, 0.0f, 0.0f, 0.75f);
-	// When true, the popup can be moved by dragging its top handle area.
-	bool m_Draggable = false;
+	bool m_Draggable = false; // bestclient
+};
+
+/**
+ * Text that keeps its text container across frames and is only rebuilt when the text or
+ * its layout changes, for text that is rendered every frame. The color is applied when
+ * rendering, so changing it does not rebuild the container.
+ *
+ * The container must be released with @link Reset @endlink before the text render drops
+ * its containers, which happens on window resize and language change.
+ */
+class CCachedText
+{
+	STextContainerIndex m_TextContainerIndex;
+	std::string m_Text;
+	float m_FontSize = -1.0f;
+	float m_LineWidth = -1.0f;
+	int m_CursorFlags = 0;
+	STextBoundingBox m_BoundingBox = {0.0f, 0.0f, 0.0f, 0.0f};
+	float m_MaxCharacterHeight = 0.0f;
+	// bestclient
+	bool m_Colored = false;
+	// bestclient
+
+public:
+	CCachedText() = default;
+	// Copying would leave two owners for the same text container.
+	CCachedText(const CCachedText &) = delete;
+	CCachedText &operator=(const CCachedText &) = delete;
+
+	void Update(ITextRender *pTextRender, const char *pText, float FontSize, float LineWidth = -1.0f, int CursorFlags = TEXTFLAG_RENDER);
+	// bestclient
+	void UpdateColored(ITextRender *pTextRender, const char *pText, float FontSize, const std::vector<STextColorSplit> &vColorSplits, float LineWidth = -1.0f, int CursorFlags = TEXTFLAG_RENDER);
+	// bestclient
+	void Render(ITextRender *pTextRender, vec2 Pos, ColorRGBA Color) const;
+	void Reset(ITextRender *pTextRender);
+
+	float Width() const { return m_BoundingBox.m_W; }
+	float MaxCharacterHeight() const { return m_MaxCharacterHeight; }
 };
 
 class CUi
@@ -407,7 +445,6 @@ private:
 	vec2 m_UpdatedMouseDelta = vec2(0.0f, 0.0f); // in window screen space
 	vec2 m_MousePos = vec2(0.0f, 0.0f); // in gui space
 	vec2 m_MouseDelta = vec2(0.0f, 0.0f); // in gui space
-	vec2 m_MouseWorldPos = vec2(-1.0f, -1.0f); // in world space
 	unsigned m_UpdatedMouseButtons = 0;
 	unsigned m_MouseButtons = 0;
 	unsigned m_LastMouseButtons = 0;
@@ -418,7 +455,23 @@ private:
 
 	unsigned m_HotkeysPressed = 0;
 
+	enum class EBackButtonOp
+	{
+		NONE,
+		CLICKED,
+		DRAGGING,
+	};
+	EBackButtonOp m_BackButtonOp = EBackButtonOp::NONE;
+	vec2 m_BackButtonDragOffset = vec2(0.0f, 0.0f);
+	vec2 m_BackButtonInitialMouse = vec2(0.0f, 0.0f);
+	CUIRect m_BackButtonRect = {0.0f, 0.0f, 0.0f, 0.0f};
+	const char m_BackButtonId = 0;
+
+	std::function<void(const IInput::CEvent &Event)> m_DispatchInputFunction;
+	std::function<void()> m_OnBackButtonPressedFunction;
+
 	CUIRect m_Screen;
+	// bestclient
 	int m_LastUiScale = -1;
 	int m_LastScreenWidth = 0;
 	int m_LastScreenHeight = 0;
@@ -426,6 +479,7 @@ private:
 	bool m_UseGraphicsScreenAspect = true;
 
 	float EffectiveScreenAspect() const;
+	// bestclient
 
 	std::vector<CUIRect> m_vClips;
 	void UpdateClipping();
@@ -434,14 +488,14 @@ private:
 	{
 		static constexpr float POPUP_BORDER = 1.0f;
 		static constexpr float POPUP_MARGIN = 4.0f;
-		static constexpr float POPUP_DRAG_HANDLE_HEIGHT = 10.0f;
+		static constexpr float POPUP_DRAG_HANDLE_HEIGHT = 10.0f; // bestclient
 
 		const SPopupMenuId *m_pId;
 		SPopupMenuProperties m_Props;
 		CUIRect m_Rect;
 		void *m_pContext;
 		FPopupMenuFunction m_pfnFunc;
-		bool m_Dragging = false;
+		bool m_Dragging = false; // bestclient
 	};
 	std::vector<SPopupMenu> m_vPopupMenus;
 	FPopupMenuClosedCallback m_pfnPopupMenuClosedCallback = nullptr;
@@ -506,23 +560,18 @@ public:
 
 	void SetEnabled(bool Enabled) { m_Enabled = Enabled; }
 	bool Enabled() const { return m_Enabled; }
-	void SetUseGraphicsScreenAspect(bool UseGraphicsScreenAspect) { m_UseGraphicsScreenAspect = UseGraphicsScreenAspect; }
-	void Update(vec2 MouseWorldPos = vec2(-1.0f, -1.0f));
+	void Update();
 	void DebugRender(float X, float Y);
 
 	vec2 MousePos() const { return m_MousePos; }
-	// Temporarily overrides the cached UI mouse position, used by components that render
-	// a sub-region at a different scale than the global UI scale (e.g. scoreboard scale).
-	// Callers must restore the previous value (from MousePos()) once done rendering.
+	// bestclient
 	void SetMousePos(vec2 Pos) { m_MousePos = Pos; }
+	// bestclient
 	float MouseX() const { return m_MousePos.x; }
 	float MouseY() const { return m_MousePos.y; }
 	vec2 MouseDelta() const { return m_MouseDelta; }
 	float MouseDeltaX() const { return m_MouseDelta.x; }
 	float MouseDeltaY() const { return m_MouseDelta.y; }
-	vec2 MouseWorldPos() const { return m_MouseWorldPos; }
-	float MouseWorldX() const { return m_MouseWorldPos.x; }
-	float MouseWorldY() const { return m_MouseWorldPos.y; }
 	vec2 UpdatedMousePos() const { return m_UpdatedMousePos; }
 	vec2 UpdatedMouseDelta() const { return m_UpdatedMouseDelta; }
 	int LastMouseButton(int Index) const { return (m_LastMouseButtons >> Index) & 1; } // TClient
@@ -562,7 +611,6 @@ public:
 	const void *HotItem() const { return m_pHotItem; }
 	const void *NextHotItem() const { return m_pBecomingHotItem; }
 	const void *ActiveItem() const { return m_pActiveItem; }
-	const void *LastActiveItem() const { return m_pLastActiveItem; }
 	const CScrollRegion *HotScrollRegion() const { return m_pHotScrollRegion; }
 
 	void StartCheck() { m_ActiveItemValid = false; }
@@ -595,6 +643,9 @@ public:
 	const CUIRect *Screen();
 	void MapScreen();
 	float PixelSize();
+	// bestclient
+	void SetUseGraphicsScreenAspect(bool UseGraphicsScreenAspect) { m_UseGraphicsScreenAspect = UseGraphicsScreenAspect; }
+	// bestclient
 
 	void ClipEnable(const CUIRect *pRect);
 	void ClipDisable();
@@ -603,6 +654,9 @@ public:
 
 	int DoButtonLogic(const void *pId, int Checked, const CUIRect *pRect, unsigned Flags);
 	int DoDraggableButtonLogic(const void *pId, int Checked, const CUIRect *pRect, bool *pClicked, bool *pAbrupted);
+	// bestclient
+	static constexpr float ms_DoubleClickTime = 0.5f;
+	// bestclient
 	bool DoDoubleClickLogic(const void *pId);
 	EEditState DoPickerLogic(const void *pId, const CUIRect *pRect, float *pX, float *pY);
 	void DoSmoothScrollLogic(float *pScrollOffset, float *pScrollOffsetChange, float ViewPortSize, float TotalSize, bool SmoothClamp = false, float ScrollSpeed = 10.0f) const;
@@ -630,7 +684,7 @@ public:
 	 *
 	 * @return true if the value of the input field changed since the last call.
 	 */
-	bool DoEditBox(CLineInput *pLineInput, const CUIRect *pRect, float FontSize, int Corners = IGraphics::CORNER_ALL, const std::vector<STextColorSplit> &vColorSplits = {}, float LineWidth = -1.0f, float LineSpacing = 0.0f, const IButtonColorFunction *pColorFunction = nullptr, int Align = -1);
+	bool DoEditBox(CLineInput *pLineInput, const CUIRect *pRect, float FontSize, int Corners = IGraphics::CORNER_ALL, const std::vector<STextColorSplit> &vColorSplits = {});
 
 	/**
 	 * Creates an input field with a clear [x] button attached to it.
@@ -669,6 +723,7 @@ public:
 	bool DoEditBox_Search(CLineInput *pLineInput, const CUIRect *pRect, float FontSize, bool HotkeyEnabled);
 
 	int DoButton_Menu(CUIElement &UIElement, const CButtonContainer *pId, const std::function<const char *()> &GetTextLambda, const CUIRect *pRect, const SMenuButtonProperties &Props = {});
+	void DrawButton_FontIcon(const char *pText, const CUIRect *pRect, ColorRGBA Color, int Corners = IGraphics::CORNER_ALL, bool Enabled = true) const;
 	int DoButton_FontIcon(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, unsigned Flags, int Corners = IGraphics::CORNER_ALL, bool Enabled = true, std::optional<ColorRGBA> ButtonColor = std::nullopt);
 	// only used for popup menus
 	int DoButton_PopupMenu(CButtonContainer *pButtonContainer, const char *pText, const CUIRect *pRect, float Size, int Align, float Padding = 0.0f, bool TransparentInactive = false, bool Enabled = true, std::optional<ColorRGBA> ButtonColor = std::nullopt);
@@ -686,22 +741,36 @@ public:
 		SCROLLBAR_OPTION_DELAYUPDATE = 1 << 3,
 	};
 	float DoScrollbarV(const void *pId, const CUIRect *pRect, float Current);
-	float DoScrollbarH(const void *pId, const CUIRect *pRect, float Current, const ColorRGBA *pColorInner = nullptr);
+	// bestclient
+	float DoScrollbarH(const void *pId, const CUIRect *pRect, float Current, const ColorRGBA *pColorInner = nullptr, const char *pValueText = nullptr);
+	// bestclient
 	bool DoScrollbarOption(const void *pId, int *pOption, const CUIRect *pRect, const char *pStr, int Min, int Max, const IScrollbarScale *pScale = &ms_LinearScrollbarScale, unsigned Flags = 0u, const char *pSuffix = "");
 
 	// progress bar
 	void RenderProgressBar(CUIRect ProgressBar, float Progress);
 
 	// render time with hundredths or thousands aligned to the right of the UIRect
-	void RenderTime(CUIRect TimeRect, float FontSize, int Seconds, bool NotFinished, int Millis, bool TrueMilliseconds) const;
+	void RenderTime(CUIRect TimeRect, float FontSize, int Seconds, bool NotFinished, int Millis, bool TrueMilliseconds, CCachedText &SecondsText, CCachedText &MillisText, ColorRGBA Color) const;
 
 	// progress spinner
 	void RenderProgressSpinner(vec2 Center, float OuterRadius, const SProgressSpinnerProperties &Props = {}) const;
 
-	// popup menu
+	// virtual back button
+	void DoBackButton();
+	void RenderBackButton();
+	void SetDispatchInputCallback(std::function<void(const IInput::CEvent &Event)> pfnCallback) { m_DispatchInputFunction = std::move(pfnCallback); }
+	// Fired the moment the back button transitions to active (mouse-down inside it).
+	void SetOnBackButtonPressedCallback(std::function<void()> pfnCallback) { m_OnBackButtonPressedFunction = std::move(pfnCallback); }
+
+	// found in ui_popups.cpp
 	void DoPopupMenu(const SPopupMenuId *pId, float X, float Y, float Width, float Height, void *pContext, FPopupMenuFunction pfnFunc, const SPopupMenuProperties &Props = {});
 	void RenderPopupMenus();
 	void ClosePopupMenu(const SPopupMenuId *pId, bool IncludeDescendants = false);
+	// bestclient
+	void SetPopupMenuHeight(const SPopupMenuId *pId, float Height);
+	bool GetPopupPosition(const SPopupMenuId *pId, float &X, float &Y) const;
+	void SetPopupPosition(const SPopupMenuId *pId, float X, float Y);
+	// bestclient
 	void ClosePopupMenus();
 	bool IsPopupOpen() const;
 	bool IsPopupOpen(const SPopupMenuId *pId) const;
@@ -767,6 +836,9 @@ public:
 		float m_Width;
 		float m_AlignmentHeight;
 		bool m_TransparentButtons;
+		// bestclient
+		bool m_OpenUpward = false;
+		// bestclient
 
 		bool m_SpecialFontRenderMode = false; // TClient
 
@@ -792,6 +864,14 @@ public:
 		ColorHSVA m_HsvaColor;
 		ColorRGBA m_RgbaColor;
 		ColorHSLA m_HslaColor;
+		// bestclient
+		ColorRGBA m_DefaultColor = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
+		bool m_HasDefault = false;
+		const char m_AlphaPickerId = 0;
+		CButtonContainer m_CopyButton;
+		CButtonContainer m_ResetButton;
+		CLineInputBuffered<16> m_HexInput;
+		// bestclient
 		// UI element IDs
 		const char m_HuePickerId = 0;
 		const char m_ColorPickerId = 0;
@@ -810,6 +890,9 @@ public:
 		bool m_Init = false;
 	};
 	int DoDropDown(CUIRect *pRect, int CurSelection, const char **pStrs, int Num, SDropDownState &State);
+	// bestclient
+	int DoDropDown(CUIRect *pRect, int CurSelection, const char **pStrs, int Num, SDropDownState &State, bool OpenUpward);
+	// bestclient
 };
 
 #endif

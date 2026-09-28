@@ -63,8 +63,8 @@ public:
 	void OnStateChange(int NewState, int OldState) override;
 	void OnRender() override;
 
-	void Clear();
 	void ClearQueue();
+	void Clear();
 	void Enqueue(int Channel, int SetId);
 	void Play(int Channel, int SetId, float Volume);
 	void PlayAt(int Channel, int SetId, float Volume, vec2 Position);

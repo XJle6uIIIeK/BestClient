@@ -9,6 +9,7 @@
 #include <base/str.h>
 
 #include <engine/external/tinyexpr.h>
+#include <engine/graphics.h>
 #include <engine/keys.h>
 #include <engine/shared/config.h>
 
@@ -42,8 +43,9 @@ void CLineInput::SetBuffer(char *pStr, size_t MaxSize, size_t MaxChars)
 		m_CaretPosition = vec2(0.0f, 0.0f);
 		m_MouseSelection.m_Selecting = false;
 		m_Hidden = false;
+		// bestclient
 		m_HideCursor = false;
-		m_AllowNewline = false;
+		// bestclient
 		m_pEmptyText = nullptr;
 		m_WasRendered = false;
 	}
@@ -128,7 +130,7 @@ const char *CLineInput::GetDisplayedString()
 	if(!IsHidden())
 		return m_pStr;
 
-	const size_t NumStars = minimum(GetNumChars(), sizeof(ms_aStars) - 1);
+	const size_t NumStars = std::min(GetNumChars(), sizeof(ms_aStars) - 1);
 	for(size_t i = 0; i < NumStars; ++i)
 		ms_aStars[i] = '*';
 	ms_aStars[NumStars] = '\0';
@@ -195,50 +197,6 @@ size_t CLineInput::OffsetFromDisplayToActual(size_t DisplayOffset)
 	return DisplayOffset;
 }
 
-// TextEx skips '\n' in GlyphCount (used as CursorCharacter), but UTF-8 char
-// offsets count newlines. Map byte <-> glyph index the same way TextEx does.
-static size_t BytesToGlyphIndex(const char *pStr, size_t ByteOffset)
-{
-	size_t Glyphs = 0;
-	size_t Offset = 0;
-	while(Offset < ByteOffset && pStr[Offset])
-	{
-		const char *pChar = pStr + Offset;
-		const int Character = str_utf8_decode(&pChar);
-		if(Character != '\n')
-			Glyphs++;
-		const size_t Next = pChar - pStr;
-		if(Next <= Offset)
-			break;
-		Offset = Next;
-	}
-	return Glyphs;
-}
-
-static size_t GlyphIndexToBytes(const char *pStr, size_t GlyphIndex)
-{
-	size_t Glyphs = 0;
-	size_t Offset = 0;
-	while(pStr[Offset])
-	{
-		const char *pChar = pStr + Offset;
-		const int Character = str_utf8_decode(&pChar);
-		const size_t Next = pChar - pStr;
-		if(Next <= Offset)
-			break;
-		if(Character == '\n')
-		{
-			Offset = Next;
-			continue;
-		}
-		if(Glyphs == GlyphIndex)
-			return Offset;
-		Glyphs++;
-		Offset = Next;
-	}
-	return Offset;
-}
-
 bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 {
 	// update derived attributes to handle external changes to the buffer
@@ -249,18 +207,9 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 	const size_t SelectionLength = GetSelectionLength();
 	bool KeyHandled = false;
 
-	// Keep caret and empty selection synchronized. Inserts use selection offsets;
-	// if they lag behind the displayed caret (e.g. after mouse placement), text
-	// appears one character to the left of the caret.
-	if(m_SelectionStart == m_SelectionEnd && (m_SelectionStart != m_CursorPos || m_SelectionEnd != m_CursorPos))
-		m_SelectionStart = m_SelectionEnd = m_CursorPos;
-
 	if(Event.m_Flags & IInput::FLAG_TEXT)
 	{
-		if(GetSelectionLength() == 0)
-			SetRange(Event.m_aText, m_CursorPos, m_CursorPos);
-		else
-			SetRange(Event.m_aText, m_SelectionStart, m_SelectionEnd);
+		SetRange(Event.m_aText, m_SelectionStart, m_SelectionEnd);
 		KeyHandled = true;
 	}
 
@@ -332,6 +281,8 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 						m_SelectionStart = m_CursorPos;
 					else if(m_SelectionEnd == OldCursorPos)
 						m_SelectionEnd = m_CursorPos;
+					if(m_SelectionStart > m_SelectionEnd)
+						std::swap(m_SelectionStart, m_SelectionEnd);
 				}
 			}
 
@@ -356,6 +307,8 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 						m_SelectionEnd = m_CursorPos;
 					else if(m_SelectionStart == OldCursorPos)
 						m_SelectionStart = m_CursorPos;
+					if(m_SelectionStart > m_SelectionEnd)
+						std::swap(m_SelectionStart, m_SelectionEnd);
 				}
 			}
 
@@ -391,11 +344,6 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 			m_SelectionEnd = m_Len;
 			KeyHandled = true;
 		}
-		else if((Event.m_Key == KEY_RETURN || Event.m_Key == KEY_KP_ENTER) && m_AllowNewline && Selecting)
-		{
-			SetRange("\n", m_SelectionStart, m_SelectionEnd);
-			KeyHandled = true;
-		}
 		else if(ModPressed && !AltPressed && Event.m_Key == KEY_V)
 		{
 			std::string ClipboardText = Input()->GetClipboardText();
@@ -411,25 +359,27 @@ bool CLineInput::ProcessInput(const IInput::CEvent &Event)
 					{
 						if(ClipboardText[i] == '\n')
 						{
-							if(i == Begin)
+							size_t End = i;
+							if(End > 0 && ClipboardText[End - 1] == '\r')
 							{
-								Begin++;
-								continue;
+								--End;
 							}
-							std::string Line = ClipboardText.substr(Begin, i - Begin + 1);
+							std::string Line = ClipboardText.substr(Begin, End - Begin);
+							str_sanitize_cc(Line.data());
 							if(FirstLine)
 							{
-								str_sanitize_cc(Line.data());
 								SetRange(Line.c_str(), m_SelectionStart, m_SelectionEnd);
 								FirstLine = false;
-								Line = GetString();
+							}
+							else
+							{
+								Set(Line.c_str());
 							}
 							Begin = i + 1;
-							str_sanitize_cc(Line.data());
-							m_pfnClipboardLineCallback(Line.c_str());
+							m_pfnClipboardLineCallback(GetString());
 						}
 					}
-					std::string Line = ClipboardText.substr(Begin, i - Begin + 1);
+					std::string Line = ClipboardText.substr(Begin);
 					str_sanitize_cc(Line.data());
 					if(FirstLine)
 						SetRange(Line.c_str(), m_SelectionStart, m_SelectionEnd);
@@ -509,7 +459,9 @@ STextBoundingBox CLineInput::Render(const CUIRect *pRect, float FontSize, int Al
 		Cursor.m_FontSize = FontSize;
 		Cursor.m_LineWidth = LineWidth;
 		Cursor.m_ForceCursorRendering = Changed;
+		// bestclient
 		Cursor.m_HideCursorQuad = m_HideCursor;
+		// bestclient
 		Cursor.m_LineSpacing = LineSpacing;
 		Cursor.m_PressMouse.x = m_MouseSelection.m_PressMouse.x;
 		Cursor.m_ReleaseMouse.x = m_MouseSelection.m_ReleaseMouse.x;
@@ -536,11 +488,11 @@ STextBoundingBox CLineInput::Render(const CUIRect *pRect, float FontSize, int Al
 			m_LastCompositionCursorPos = CaretOffset;
 			const size_t DisplayCompositionEnd = DisplayCursorOffset + Input()->GetCompositionLength();
 			Cursor.m_CursorMode = TEXT_CURSOR_CURSOR_MODE_SET;
-			Cursor.m_CursorCharacter = BytesToGlyphIndex(pDisplayStr, CaretOffset);
+			Cursor.m_CursorCharacter = str_utf8_offset_bytes_to_chars(pDisplayStr, CaretOffset);
 			Cursor.m_CalculateSelectionMode = TEXT_CURSOR_SELECTION_MODE_SET;
 			Cursor.m_SelectionHeightFactor = 0.1f;
-			Cursor.m_SelectionStart = BytesToGlyphIndex(pDisplayStr, DisplayCursorOffset);
-			Cursor.m_SelectionEnd = BytesToGlyphIndex(pDisplayStr, DisplayCompositionEnd);
+			Cursor.m_SelectionStart = str_utf8_offset_bytes_to_chars(pDisplayStr, DisplayCursorOffset);
+			Cursor.m_SelectionEnd = str_utf8_offset_bytes_to_chars(pDisplayStr, DisplayCompositionEnd);
 			TextRender()->TextSelectionColor(1.0f, 1.0f, 1.0f, 0.8f);
 			TextRender()->TextEx(&Cursor, pDisplayStr);
 			TextRender()->TextSelectionColor(TextRender()->DefaultTextSelectionColor());
@@ -550,29 +502,29 @@ STextBoundingBox CLineInput::Render(const CUIRect *pRect, float FontSize, int Al
 			const size_t Start = OffsetFromActualToDisplay(GetSelectionStart());
 			const size_t End = OffsetFromActualToDisplay(GetSelectionEnd());
 			Cursor.m_CursorMode = m_MouseSelection.m_Selecting ? TEXT_CURSOR_CURSOR_MODE_CALCULATE : TEXT_CURSOR_CURSOR_MODE_SET;
-			Cursor.m_CursorCharacter = BytesToGlyphIndex(pDisplayStr, CaretOffset);
+			Cursor.m_CursorCharacter = str_utf8_offset_bytes_to_chars(pDisplayStr, CaretOffset);
 			Cursor.m_CalculateSelectionMode = m_MouseSelection.m_Selecting ? TEXT_CURSOR_SELECTION_MODE_CALCULATE : TEXT_CURSOR_SELECTION_MODE_SET;
-			Cursor.m_SelectionStart = BytesToGlyphIndex(pDisplayStr, Start);
-			Cursor.m_SelectionEnd = BytesToGlyphIndex(pDisplayStr, End);
+			Cursor.m_SelectionStart = str_utf8_offset_bytes_to_chars(pDisplayStr, Start);
+			Cursor.m_SelectionEnd = str_utf8_offset_bytes_to_chars(pDisplayStr, End);
 			TextRender()->TextEx(&Cursor, pDisplayStr);
 		}
 		else
 		{
 			Cursor.m_CursorMode = m_MouseSelection.m_Selecting ? TEXT_CURSOR_CURSOR_MODE_CALCULATE : TEXT_CURSOR_CURSOR_MODE_SET;
-			Cursor.m_CursorCharacter = BytesToGlyphIndex(pDisplayStr, CaretOffset);
+			Cursor.m_CursorCharacter = str_utf8_offset_bytes_to_chars(pDisplayStr, CaretOffset);
 			Cursor.m_CalculateSelectionMode = m_MouseSelection.m_Selecting ? TEXT_CURSOR_SELECTION_MODE_CALCULATE : TEXT_CURSOR_SELECTION_MODE_NONE;
 			TextRender()->TextEx(&Cursor, pDisplayStr);
 		}
 
 		if(Cursor.m_CursorMode == TEXT_CURSOR_CURSOR_MODE_CALCULATE && Cursor.m_CursorCharacter >= 0)
 		{
-			const size_t NewCursorOffset = GlyphIndexToBytes(pDisplayStr, Cursor.m_CursorCharacter);
+			const size_t NewCursorOffset = str_utf8_offset_chars_to_bytes(pDisplayStr, Cursor.m_CursorCharacter);
 			SetCursorOffset(OffsetFromDisplayToActual(NewCursorOffset));
 		}
 		if(Cursor.m_CalculateSelectionMode == TEXT_CURSOR_SELECTION_MODE_CALCULATE && Cursor.m_SelectionStart >= 0 && Cursor.m_SelectionEnd >= 0)
 		{
-			const size_t NewSelectionStart = GlyphIndexToBytes(pDisplayStr, Cursor.m_SelectionStart);
-			const size_t NewSelectionEnd = GlyphIndexToBytes(pDisplayStr, Cursor.m_SelectionEnd);
+			const size_t NewSelectionStart = str_utf8_offset_chars_to_bytes(pDisplayStr, Cursor.m_SelectionStart);
+			const size_t NewSelectionEnd = str_utf8_offset_chars_to_bytes(pDisplayStr, Cursor.m_SelectionEnd);
 			SetSelection(OffsetFromDisplayToActual(NewSelectionStart), OffsetFromDisplayToActual(NewSelectionEnd));
 		}
 
@@ -585,7 +537,7 @@ STextBoundingBox CLineInput::Render(const CUIRect *pRect, float FontSize, int Al
 		CaretCursor.m_LineWidth = LineWidth;
 		CaretCursor.m_LineSpacing = LineSpacing;
 		CaretCursor.m_CursorMode = TEXT_CURSOR_CURSOR_MODE_SET;
-		CaretCursor.m_CursorCharacter = BytesToGlyphIndex(pDisplayStr, DisplayCursorOffset);
+		CaretCursor.m_CursorCharacter = str_utf8_offset_bytes_to_chars(pDisplayStr, DisplayCursorOffset);
 		TextRender()->TextEx(&CaretCursor, pDisplayStr);
 		SetCompositionWindowPosition(CaretCursor.m_CursorRenderedPosition + vec2(0.0f, CaretCursor.m_AlignedFontSize / 2.0f), CaretCursor.m_AlignedFontSize);
 	}
@@ -632,21 +584,20 @@ void CLineInput::RenderCandidates()
 	const float Margin = 4.0f;
 	const float Height = 300.0f;
 	const float Width = Height * Graphics()->ScreenAspect();
-	const int ScreenWidth = Graphics()->ScreenWidth();
-	const int ScreenHeight = Graphics()->ScreenHeight();
+	const vec2 ScreenSize = Graphics()->ScreenSize();
 
-	Graphics()->MapScreen(0.0f, 0.0f, Width, Height);
+	Graphics()->MapScreenToSize(Width, Height);
 
 	// Determine longest candidate width
 	float LongestCandidateWidth = 0.0f;
 	for(int i = 0; i < Input()->GetCandidateCount(); ++i)
-		LongestCandidateWidth = maximum(LongestCandidateWidth, TextRender()->TextWidth(FontSize, Input()->GetCandidate(i)));
+		LongestCandidateWidth = std::max(LongestCandidateWidth, TextRender()->TextWidth(FontSize, Input()->GetCandidate(i)));
 
 	const float NumOffset = 8.0f;
 	const float RectWidth = LongestCandidateWidth + Margin + NumOffset + 2.0f * Padding;
 	const float RectHeight = Input()->GetCandidateCount() * (FontSize + 2.0f * Padding) + Margin;
 
-	vec2 Position = ms_CompositionWindowPosition / vec2(ScreenWidth, ScreenHeight) * vec2(Width, Height);
+	vec2 Position = ms_CompositionWindowPosition / ScreenSize * vec2(Width, Height);
 	Position.y += Margin;
 
 	// Move candidate window left if needed
@@ -655,11 +606,10 @@ void CLineInput::RenderCandidates()
 
 	// Move candidate window up if needed
 	if(Position.y + RectHeight + Margin > Height)
-		Position.y -= RectHeight + ms_CompositionLineHeight / ScreenHeight * Height + 2.0f * Margin;
+		Position.y -= RectHeight + ms_CompositionLineHeight / ScreenSize.y * Height + 2.0f * Margin;
 
 	Graphics()->TextureClear();
 	Graphics()->QuadsBegin();
-	Graphics()->BlendNormal();
 
 	// Draw window shadow
 	Graphics()->SetColor(0.0f, 0.0f, 0.0f, 0.8f);
@@ -694,12 +644,7 @@ void CLineInput::RenderCandidates()
 
 void CLineInput::SetCompositionWindowPosition(vec2 Anchor, float LineHeight)
 {
-	float ScreenX0, ScreenY0, ScreenX1, ScreenY1;
-	const int ScreenWidth = Graphics()->ScreenWidth();
-	const int ScreenHeight = Graphics()->ScreenHeight();
-	Graphics()->GetScreen(&ScreenX0, &ScreenY0, &ScreenX1, &ScreenY1);
-
-	const vec2 ScreenScale = vec2(ScreenWidth / (ScreenX1 - ScreenX0), ScreenHeight / (ScreenY1 - ScreenY0));
+	const vec2 ScreenScale = Graphics()->ScreenSize() / Graphics()->GetScreen().Size();
 	ms_CompositionWindowPosition = Anchor * ScreenScale;
 	ms_CompositionLineHeight = LineHeight * ScreenScale.y;
 	Input()->SetCompositionWindowPosition(ms_CompositionWindowPosition.x, ms_CompositionWindowPosition.y, ms_CompositionLineHeight);
@@ -806,5 +751,6 @@ void CLineInputNumber::SetFloat(float Number)
 
 float CLineInputNumber::GetFloat() const
 {
+	// return str_tofloat(GetString());
 	return (float)te_interp(GetString(), nullptr);
 }

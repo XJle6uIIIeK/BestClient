@@ -22,10 +22,20 @@ enum
 
 constexpr float MAX_DELTA = 0.1f;
 constexpr float PROJ_DIST = 600.0f;
-constexpr int PARTICLE_MAX_RENDERED = 200;
-constexpr int MAX_COLLISION_PARTICLES = 96;
+constexpr float PROJ_SCALE_MIN = 0.5f;
+constexpr float PROJ_SCALE_MAX = 1.6f;
+constexpr int PARTICLE_MAX_CUBE = 12000;
+constexpr int PARTICLE_MAX_HEART = 8000;
+constexpr int MAX_COLLISION_PARTICLES = 140;
+constexpr size_t MAX_COLLISION_PAIRS = 10000;
+constexpr float GLOW_ALPHA = 0.35f;
+constexpr float GLOW_OFFSET = 2.0f;
+constexpr float DENSITY_CELL_SPARSE = 120.0f;
+constexpr float DENSITY_CELL_DENSE = 14.0f;
+constexpr float UPDATE_EXPAND = 1.35f;
+constexpr float HEART_SIZE_SCALE = 0.09f;
 
-const std::array<vec3, 8> g_aCubeVertices = { {
+const std::array<vec3, 8> g_aCubeVertices = {{
 	vec3(-1.0f, -1.0f, -1.0f),
 	vec3(1.0f, -1.0f, -1.0f),
 	vec3(1.0f, 1.0f, -1.0f),
@@ -34,27 +44,26 @@ const std::array<vec3, 8> g_aCubeVertices = { {
 	vec3(1.0f, -1.0f, 1.0f),
 	vec3(1.0f, 1.0f, 1.0f),
 	vec3(-1.0f, 1.0f, 1.0f),
-} };
+}};
 
-const std::array<std::array<int, 2>, 12> g_aCubeEdges = { {
-	{ {0, 1} },
-	{ {1, 2} },
-	{ {2, 3} },
-	{ {3, 0} },
-	{ {4, 5} },
-	{ {5, 6} },
-	{ {6, 7} },
-	{ {7, 4} },
-	{ {0, 4} },
-	{ {1, 5} },
-	{ {2, 6} },
-	{ {3, 7} },
-} };
+const std::array<std::array<int, 2>, 12> g_aCubeEdges = {{
+	{{0, 1}},
+	{{1, 2}},
+	{{2, 3}},
+	{{3, 0}},
+	{{4, 5}},
+	{{5, 6}},
+	{{6, 7}},
+	{{7, 4}},
+	{{0, 4}},
+	{{1, 5}},
+	{{2, 6}},
+	{{3, 7}},
+}};
 
-constexpr int HEART_POINTS = 96;
-constexpr int HEART_LOW_POINTS = 24;
-constexpr int HEART_LAYERS = 5;
-constexpr float HEART_THICKNESS = 0.35f;
+constexpr int HEART_POINTS = 8;
+constexpr int HEART_LAYERS = 2;
+constexpr float HEART_THICKNESS = 0.28f;
 
 struct SRotation
 {
@@ -79,7 +88,7 @@ vec3 RotateVec3(const vec3 &V, const SRotation &Rot)
 
 vec2 ProjectPoint(const vec3 &Pos, const vec2 &Center)
 {
-	const float Scale = std::clamp(PROJ_DIST / (PROJ_DIST + Pos.z), 0.5f, 1.6f);
+	const float Scale = std::clamp(PROJ_DIST / (PROJ_DIST + Pos.z), PROJ_SCALE_MIN, PROJ_SCALE_MAX);
 	const vec2 Rel = vec2(Pos.x - Center.x, Pos.y - Center.y);
 	return Center + Rel * Scale;
 }
@@ -102,29 +111,24 @@ const std::array<vec3, HEART_POINTS> &HeartVertices()
 	return s_aVerts;
 }
 
-const std::array<vec3, HEART_LOW_POINTS> &HeartLowVertices()
-{
-	static std::array<vec3, HEART_LOW_POINTS> s_aVerts;
-	static bool s_Initialized = false;
-	if(!s_Initialized)
-	{
-		const auto &HighRes = HeartVertices();
-		for(int i = 0; i < HEART_LOW_POINTS; i++)
-		{
-			const int Src = std::clamp((i * HEART_POINTS) / HEART_LOW_POINTS, 0, HEART_POINTS - 1);
-			s_aVerts[i] = HighRes[Src];
-		}
-		s_Initialized = true;
-	}
-	return s_aVerts;
-}
-
 int PickType(int ConfigType)
 {
 	if(ConfigType == SHAPE_MIXED)
 		return random_float() > 0.5f ? SHAPE_CUBE : SHAPE_HEART;
 	return ConfigType;
 }
+
+ColorRGBA MakeParticleColor()
+{
+	ColorRGBA BaseColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_Bc3dParticlesColor, true));
+	if(g_Config.m_Bc3dParticlesColorMode == 2)
+	{
+		const ColorHSLA RandomColor(random_float(), 0.85f, 0.65f, BaseColor.a);
+		BaseColor = color_cast<ColorRGBA>(RandomColor);
+	}
+	return BaseColor;
+}
+
 } // namespace
 
 void C3DParticles::OnInit()
@@ -150,7 +154,6 @@ void C3DParticles::OnStateChange(int NewState, int OldState)
 void C3DParticles::ResetParticles()
 {
 	m_vParticles.clear();
-	m_Time = 0.0f;
 	m_HasLastLocalPos = false;
 	m_LastLocalPos = vec2(0.0f, 0.0f);
 }
@@ -165,11 +168,7 @@ void C3DParticles::OnRender()
 	}
 
 	if(GameClient()->OptimizerDisableParticles())
-	{
-		if(!m_vParticles.empty())
-			ResetParticles();
 		return;
-	}
 
 	if(!g_Config.m_Bc3dParticles)
 	{
@@ -185,69 +184,45 @@ void C3DParticles::OnRender()
 	}
 
 	const int CurType = g_Config.m_Bc3dParticlesType;
-	const int CurCount = g_Config.m_Bc3dParticlesCount;
 	const int CurSizeMax = g_Config.m_Bc3dParticlesSizeMax;
-	const int CurSpeed = g_Config.m_Bc3dParticlesSpeed;
-	const int CurAlpha = g_Config.m_Bc3dParticlesAlpha;
+	const int CurDensity = g_Config.m_Bc3dParticlesDensity;
 	const int CurColorMode = g_Config.m_Bc3dParticlesColorMode;
 	const unsigned CurColor = g_Config.m_Bc3dParticlesColor;
-	const int CurGlow = g_Config.m_Bc3dParticlesGlow;
-	const int CurGlowAlpha = g_Config.m_Bc3dParticlesGlowAlpha;
-	const int CurGlowOffset = g_Config.m_Bc3dParticlesGlowOffset;
-	const int CurDepth = g_Config.m_Bc3dParticlesDepth;
-	const int CurFadeInMs = g_Config.m_Bc3dParticlesFadeInMs;
-	const int CurFadeOutMs = g_Config.m_Bc3dParticlesFadeOutMs;
-	const int CurPushRadius = g_Config.m_Bc3dParticlesPushRadius;
-	const int CurPushStrength = g_Config.m_Bc3dParticlesPushStrength;
-	const int CurCollide = g_Config.m_Bc3dParticlesCollide;
-	const int CurViewMargin = g_Config.m_Bc3dParticlesViewMargin;
 
-	const bool Changed = !m_HasConfigSnapshot ||
+	const bool StructuralChanged = !m_HasConfigSnapshot ||
 		CurType != m_LastType ||
-		CurCount != m_LastCount ||
 		CurSizeMax != m_LastSizeMax ||
-		CurSpeed != m_LastSpeed ||
-		CurAlpha != m_LastAlpha ||
-		CurColorMode != m_LastColorMode ||
-		CurColor != m_LastColor ||
-		CurGlow != m_LastGlow ||
-		CurGlowAlpha != m_LastGlowAlpha ||
-		CurGlowOffset != m_LastGlowOffset ||
-		CurDepth != m_LastDepth ||
-		CurFadeInMs != m_LastFadeInMs ||
-		CurFadeOutMs != m_LastFadeOutMs ||
-		CurPushRadius != m_LastPushRadius ||
-		CurPushStrength != m_LastPushStrength ||
-		CurCollide != m_LastCollide ||
-		CurViewMargin != m_LastViewMargin;
+		CurDensity != m_LastDensity;
 
-	if(Changed)
+	if(StructuralChanged)
 	{
 		m_LastType = CurType;
-		m_LastCount = CurCount;
 		m_LastSizeMax = CurSizeMax;
-		m_LastSpeed = CurSpeed;
-		m_LastAlpha = CurAlpha;
+		m_LastDensity = CurDensity;
 		m_LastColorMode = CurColorMode;
 		m_LastColor = CurColor;
-		m_LastGlow = CurGlow;
-		m_LastGlowAlpha = CurGlowAlpha;
-		m_LastGlowOffset = CurGlowOffset;
-		m_LastDepth = CurDepth;
-		m_LastFadeInMs = CurFadeInMs;
-		m_LastFadeOutMs = CurFadeOutMs;
-		m_LastPushRadius = CurPushRadius;
-		m_LastPushStrength = CurPushStrength;
-		m_LastCollide = CurCollide;
-		m_LastViewMargin = CurViewMargin;
 		m_HasConfigSnapshot = true;
 		ResetParticles();
+		m_LastAutoCount = 0;
+		m_LastMapW = 0;
+		m_LastMapH = 0;
+	}
+	else if(CurColorMode != m_LastColorMode || CurColor != m_LastColor)
+	{
+		for(auto &Part : m_vParticles)
+		{
+			if(CurColorMode == 2)
+				Part.m_Color = MakeParticleColor();
+			else
+				Part.m_Color = color_cast<ColorRGBA>(ColorHSLA(CurColor, true));
+		}
+		m_LastColorMode = CurColorMode;
+		m_LastColor = CurColor;
 	}
 
 	const float Delta = std::clamp(Client()->RenderFrameTime(), 0.0f, MAX_DELTA);
 	if(Delta <= 0.0f)
 		return;
-	m_Time += Delta;
 
 	vec2 LocalPos = GameClient()->m_Camera.m_Center;
 	if(GameClient()->m_Snap.m_pLocalCharacter != nullptr)
@@ -260,50 +235,126 @@ void C3DParticles::OnRender()
 	m_HasLastLocalPos = true;
 
 	const float Depth = std::clamp((float)g_Config.m_Bc3dParticlesDepth, 10.0f, 1000.0f);
-	const float FadeIn = std::clamp(g_Config.m_Bc3dParticlesFadeInMs / 1000.0f, 0.001f, 5.0f);
-	const float FadeOut = std::clamp(g_Config.m_Bc3dParticlesFadeOutMs / 1000.0f, 0.001f, 5.0f);
 	const float BaseAlpha = std::clamp(g_Config.m_Bc3dParticlesAlpha / 100.0f, 0.0f, 1.0f);
 
-	float ScreenX0, ScreenY0, ScreenX1, ScreenY1;
-	Graphics()->GetScreen(&ScreenX0, &ScreenY0, &ScreenX1, &ScreenY1);
-	const float ScreenMinX = std::min(ScreenX0, ScreenX1);
-	const float ScreenMaxX = std::max(ScreenX0, ScreenX1);
-	const float ScreenMinY = std::min(ScreenY0, ScreenY1);
-	const float ScreenMaxY = std::max(ScreenY0, ScreenY1);
+	const CScreenRect ScreenRect = Graphics()->GetScreen();
+	const float ScreenMinX = std::min(ScreenRect.m_TopLeft.x, ScreenRect.m_BottomRight.x);
+	const float ScreenMaxX = std::max(ScreenRect.m_TopLeft.x, ScreenRect.m_BottomRight.x);
+	const float ScreenMinY = std::min(ScreenRect.m_TopLeft.y, ScreenRect.m_BottomRight.y);
+	const float ScreenMaxY = std::max(ScreenRect.m_TopLeft.y, ScreenRect.m_BottomRight.y);
+	const float ScreenCenterX = GameClient()->m_Camera.m_Center.x;
+	const float ScreenCenterY = GameClient()->m_Camera.m_Center.y;
+	const float ScreenHalfW = (ScreenMaxX - ScreenMinX) * 0.5f;
+	const float ScreenHalfH = (ScreenMaxY - ScreenMinY) * 0.5f;
 
 	const float MapMinX = 0.0f;
 	const float MapMinY = 0.0f;
 	const float MapMaxX = Collision()->GetWidth() * 32.0f;
 	const float MapMaxY = Collision()->GetHeight() * 32.0f;
-	if(MapMaxX <= MapMinX || MapMaxY <= MapMinY)
+	const float MapW = MapMaxX - MapMinX;
+	const float MapH = MapMaxY - MapMinY;
+	if(MapW <= 0.0f || MapH <= 0.0f)
 		return;
 
+	const int MapWInt = Collision()->GetWidth();
+	const int MapHInt = Collision()->GetHeight();
+
+	int ConfigType = (int)g_Config.m_Bc3dParticlesType;
+	if(ConfigType < SHAPE_CUBE)
+		ConfigType = SHAPE_CUBE;
+	else if(ConfigType > SHAPE_MIXED)
+		ConfigType = SHAPE_MIXED;
+	const int SizeMaxValue = std::clamp((int)g_Config.m_Bc3dParticlesSizeMax, 2, 200);
+	const float SizeMin = (float)std::max(2, SizeMaxValue - 3);
+	const float SizeMax = (float)SizeMaxValue;
 	const float ViewMargin = std::clamp((float)g_Config.m_Bc3dParticlesViewMargin, 0.0f, 1000.0f);
-	const float ViewMinX = std::max(ScreenMinX - ViewMargin, MapMinX);
-	const float ViewMaxX = std::min(ScreenMaxX + ViewMargin, MapMaxX);
-	const float ViewMinY = std::max(ScreenMinY - ViewMargin, MapMinY);
-	const float ViewMaxY = std::min(ScreenMaxY + ViewMargin, MapMaxY);
 
-	const float SpawnMinX = std::max(ScreenMinX, MapMinX);
-	const float SpawnMaxX = std::min(ScreenMaxX, MapMaxX);
-	const float SpawnMinY = std::max(ScreenMinY, MapMinY);
-	const float SpawnMaxY = std::min(ScreenMaxY, MapMaxY);
-	const bool HasSpawnArea = SpawnMaxX > SpawnMinX && SpawnMaxY > SpawnMinY;
+	const float CullPad = SizeMax * PROJ_SCALE_MAX + 8.0f;
+	const float CullHalfW = ScreenHalfW / PROJ_SCALE_MIN + CullPad;
+	const float CullHalfH = ScreenHalfH / PROJ_SCALE_MIN + CullPad;
+	const float CullMinX = ScreenCenterX - CullHalfW;
+	const float CullMaxX = ScreenCenterX + CullHalfW;
+	const float CullMinY = ScreenCenterY - CullHalfH;
+	const float CullMaxY = ScreenCenterY + CullHalfH;
+	const float RenderMinX = CullMinX - ViewMargin;
+	const float RenderMaxX = CullMaxX + ViewMargin;
+	const float RenderMinY = CullMinY - ViewMargin;
+	const float RenderMaxY = CullMaxY + ViewMargin;
+	const float Speed = (float)g_Config.m_Bc3dParticlesSpeed;
+	const int MaxCount = (ConfigType == SHAPE_HEART) ? PARTICLE_MAX_HEART : PARTICLE_MAX_CUBE;
 
-	int TargetCount = std::clamp(g_Config.m_Bc3dParticlesCount, 0, PARTICLE_MAX_RENDERED);
-	if(GameClient()->OptimizerDisableParticles())
-		TargetCount = minimum(TargetCount, 32);
-	if((int)m_vParticles.size() > TargetCount)
-		m_vParticles.resize(TargetCount);
+	const float DensityT = std::clamp((CurDensity - 1) / 599.0f, 0.0f, 1.0f);
+	const float DensityCell = mix(DENSITY_CELL_SPARSE, DENSITY_CELL_DENSE, DensityT);
+	const int DensityCols = std::max(1, (int)std::round(MapW / DensityCell));
+	const int DensityRows = std::max(1, (int)std::round(MapH / DensityCell));
+	int TargetCount = std::clamp(DensityCols * DensityRows, 48, MaxCount);
+
+	auto InitParticleMotion = [&](SParticle &P) {
+		vec3 Dir(random_float(-1.0f, 1.0f), random_float(-1.0f, 1.0f), 0.0f);
+		const float DirLen = length(Dir);
+		if(DirLen < 0.001f)
+			Dir = vec3(1.0f, 0.0f, 0.0f);
+		else
+			Dir /= DirLen;
+		P.m_Vel = Dir * Speed;
+		P.m_Rot = vec3(random_float(-0.35f, 0.35f), random_float(-0.35f, 0.35f), random_float(0.0f, 2.0f * pi));
+		P.m_RotVel = vec3(random_float(-0.08f, 0.08f), random_float(-0.08f, 0.08f), random_float(-0.2f, 0.2f));
+	};
+
+	const bool NeedRefill = (int)m_vParticles.size() != TargetCount ||
+		MapWInt != m_LastMapW || MapHInt != m_LastMapH || TargetCount != m_LastAutoCount;
+	if(NeedRefill)
+	{
+		m_vParticles.clear();
+		m_vParticles.reserve(TargetCount);
+		const int FillCols = std::max(1, (int)std::ceil(std::sqrt((float)TargetCount * MapW / MapH)));
+		const int FillRows = std::max(1, (int)std::ceil((float)TargetCount / (float)FillCols));
+		const float CellW = MapW / (float)FillCols;
+		const float CellH = MapH / (float)FillRows;
+
+		for(int i = 0; i < TargetCount; i++)
+		{
+			const int Col = i % FillCols;
+			const int Row = i / FillCols;
+			SParticle P;
+			P.m_Type = PickType(ConfigType);
+			P.m_Size = random_float(SizeMin, SizeMax);
+			P.m_Color = MakeParticleColor();
+			const float X = std::clamp(MapMinX + (Col + random_float(0.15f, 0.85f)) * CellW, MapMinX, MapMaxX);
+			const float Y = std::clamp(MapMinY + (Row + random_float(0.15f, 0.85f)) * CellH, MapMinY, MapMaxY);
+			P.m_Pos = vec3(X, Y, random_float(-Depth, Depth));
+			InitParticleMotion(P);
+			m_vParticles.push_back(P);
+		}
+
+		m_LastMapW = MapWInt;
+		m_LastMapH = MapHInt;
+		m_LastAutoCount = TargetCount;
+	}
 
 	const float PushRadius = std::clamp((float)g_Config.m_Bc3dParticlesPushRadius, 0.0f, 1000.0f);
 	const float PushStrength = std::clamp((float)g_Config.m_Bc3dParticlesPushStrength, 0.0f, 2000.0f);
-	const float MaxSpeed = maximum(40.0f, (float)g_Config.m_Bc3dParticlesSpeed * 4.0f);
+	const float MaxSpeed = std::max(40.0f, Speed * 4.0f);
 	const float PushRadiusSq = PushRadius * PushRadius;
-	const bool EnableParticleCollisions = g_Config.m_Bc3dParticlesCollide != 0 && TargetCount <= MAX_COLLISION_PARTICLES;
+	const bool EnableParticleCollisions = g_Config.m_Bc3dParticlesCollide != 0;
 
-	for(auto &Part : m_vParticles)
+	const float UpdateHalfW = std::max((CullHalfW + ViewMargin) * UPDATE_EXPAND, 500.0f);
+	const float UpdateHalfH = std::max((CullHalfH + ViewMargin) * UPDATE_EXPAND, 500.0f);
+	const float UpdateMinX = ScreenCenterX - UpdateHalfW;
+	const float UpdateMaxX = ScreenCenterX + UpdateHalfW;
+	const float UpdateMinY = ScreenCenterY - UpdateHalfH;
+	const float UpdateMaxY = ScreenCenterY + UpdateHalfH;
+
+	std::vector<size_t> vActive;
+	vActive.reserve(256);
+
+	for(size_t i = 0; i < m_vParticles.size(); i++)
 	{
+		auto &Part = m_vParticles[i];
+		if(Part.m_Pos.x < UpdateMinX || Part.m_Pos.x > UpdateMaxX || Part.m_Pos.y < UpdateMinY || Part.m_Pos.y > UpdateMaxY)
+			continue;
+
+		vActive.push_back(i);
 		Part.m_Pos += Part.m_Vel * Delta;
 		Part.m_Rot += Part.m_RotVel * Delta;
 
@@ -321,177 +372,75 @@ void C3DParticles::OnRender()
 			}
 		}
 
-		const float Speed = length(Part.m_Vel);
-		if(Speed > MaxSpeed)
-			Part.m_Vel = Part.m_Vel / Speed * MaxSpeed;
+		const float PartSpeed = length(Part.m_Vel);
+		if(PartSpeed > MaxSpeed)
+			Part.m_Vel = Part.m_Vel / PartSpeed * MaxSpeed;
 		Part.m_Vel *= 0.995f;
 
 		Part.m_Pos.z = std::clamp(Part.m_Pos.z, -Depth, Depth);
-		const bool OutsideView = Part.m_Pos.x < ViewMinX || Part.m_Pos.x > ViewMaxX || Part.m_Pos.y < ViewMinY || Part.m_Pos.y > ViewMaxY;
-		if(OutsideView && !Part.m_FadingOut)
+
+		if(Part.m_Pos.x < MapMinX)
 		{
-			Part.m_FadingOut = true;
-			Part.m_FadeOutStart = m_Time;
+			Part.m_Pos.x = MapMinX;
+			Part.m_Vel.x = std::abs(Part.m_Vel.x);
 		}
-		else if(!OutsideView && Part.m_FadingOut)
+		else if(Part.m_Pos.x > MapMaxX)
 		{
-			Part.m_FadingOut = false;
-			Part.m_FadeOutStart = 0.0f;
+			Part.m_Pos.x = MapMaxX;
+			Part.m_Vel.x = -std::abs(Part.m_Vel.x);
+		}
+		if(Part.m_Pos.y < MapMinY)
+		{
+			Part.m_Pos.y = MapMinY;
+			Part.m_Vel.y = std::abs(Part.m_Vel.y);
+		}
+		else if(Part.m_Pos.y > MapMaxY)
+		{
+			Part.m_Pos.y = MapMaxY;
+			Part.m_Vel.y = -std::abs(Part.m_Vel.y);
 		}
 	}
 
-	if(EnableParticleCollisions && m_vParticles.size() > 1)
+	if(EnableParticleCollisions && vActive.size() > 1 && vActive.size() <= (size_t)MAX_COLLISION_PARTICLES && vActive.size() * (vActive.size() - 1) / 2 <= MAX_COLLISION_PAIRS)
 	{
-		const size_t ParticleCount = m_vParticles.size();
-		const size_t MaxCollisionChecks = 10000;
-
-		if(ParticleCount * (ParticleCount - 1) / 2 <= MaxCollisionChecks)
+		for(size_t ai = 0; ai < vActive.size(); ai++)
 		{
-			for(size_t i = 0; i < ParticleCount; i++)
+			for(size_t aj = ai + 1; aj < vActive.size(); aj++)
 			{
-				for(size_t j = i + 1; j < ParticleCount; j++)
+				auto &A = m_vParticles[vActive[ai]];
+				auto &B = m_vParticles[vActive[aj]];
+				const vec3 Diff = A.m_Pos - B.m_Pos;
+				const float Radius = (A.m_Size + B.m_Size) * 0.6f;
+				const float RadiusSq = Radius * Radius;
+				const float DistSq = dot(Diff, Diff);
+				if(DistSq > 0.0001f && DistSq < RadiusSq)
 				{
-					auto &A = m_vParticles[i];
-					auto &B = m_vParticles[j];
-					const vec3 Diff = A.m_Pos - B.m_Pos;
-					const float Radius = (A.m_Size + B.m_Size) * 0.6f;
-					const float RadiusSq = Radius * Radius;
-					const float DistSq = dot(Diff, Diff);
-					if(DistSq > 0.0001f && DistSq < RadiusSq)
-					{
-						const float Dist = sqrtf(DistSq);
-						const vec3 Dir = Diff / Dist;
-						const float Pen = Radius - Dist;
-						const float MassA = maximum(1.0f, A.m_Size);
-						const float MassB = maximum(1.0f, B.m_Size);
-						A.m_Pos += Dir * (Pen * (MassB / (MassA + MassB)));
-						B.m_Pos -= Dir * (Pen * (MassA / (MassA + MassB)));
+					const float Dist = sqrtf(DistSq);
+					const vec3 Dir = Diff / Dist;
+					const float Pen = Radius - Dist;
+					const float MassA = std::max(1.0f, A.m_Size);
+					const float MassB = std::max(1.0f, B.m_Size);
+					A.m_Pos += Dir * (Pen * (MassB / (MassA + MassB)));
+					B.m_Pos -= Dir * (Pen * (MassA / (MassA + MassB)));
 
-						const vec3 RelVel = A.m_Vel - B.m_Vel;
-						const float RelAlong = dot(RelVel, Dir);
-						if(RelAlong < 0.0f)
-						{
-							const float Restitution = 0.6f;
-							const float Impulse = (-(1.0f + Restitution) * RelAlong) / (1.0f / MassA + 1.0f / MassB);
-							A.m_Vel += Dir * (Impulse / MassA);
-							B.m_Vel -= Dir * (Impulse / MassB);
-						}
+					const vec3 RelVel = A.m_Vel - B.m_Vel;
+					const float RelAlong = dot(RelVel, Dir);
+					if(RelAlong < 0.0f)
+					{
+						const float Restitution = 0.6f;
+						const float Impulse = (-(1.0f + Restitution) * RelAlong) / (1.0f / MassA + 1.0f / MassB);
+						A.m_Vel += Dir * (Impulse / MassA);
+						B.m_Vel -= Dir * (Impulse / MassB);
 					}
 				}
 			}
 		}
 	}
 
-	for(size_t i = 0; i < m_vParticles.size();)
-	{
-		auto &Part = m_vParticles[i];
-		if(Part.m_FadingOut)
-		{
-			const float T = FadeOut > 0.0f ? (m_Time - Part.m_FadeOutStart) / FadeOut : 1.0f;
-			if(T >= 1.0f)
-			{
-				m_vParticles[i] = m_vParticles.back();
-				m_vParticles.pop_back();
-				continue;
-			}
-		}
-		i++;
-	}
-
-	const int Missing = TargetCount - (int)m_vParticles.size();
-	const int SpawnNow = HasSpawnArea ? std::min(Missing, 10) : 0;
-	const float SpawnWidth = maximum(1.0f, SpawnMaxX - SpawnMinX);
-	const float SpawnHeight = maximum(1.0f, SpawnMaxY - SpawnMinY);
-	const float SpawnArea = SpawnWidth * SpawnHeight;
-	const float IdealSpacing = std::sqrt(SpawnArea / maximum(1, TargetCount));
-	const float MinSpacing = std::clamp(IdealSpacing * 0.6f, 8.0f, 160.0f);
-	const float MinSpacingSq = MinSpacing * MinSpacing;
-
-	auto IsPositionFree = [&](const vec2 &Pos, float MinDistSq) {
-		for(const auto &Part : m_vParticles)
-		{
-			const float Dx = Part.m_Pos.x - Pos.x;
-			const float Dy = Part.m_Pos.y - Pos.y;
-			if(Dx * Dx + Dy * Dy < MinDistSq)
-				return false;
-		}
-		return true;
-	};
-
-	const int ConfigTypeValue = (int)g_Config.m_Bc3dParticlesType;
-	int ConfigType = ConfigTypeValue;
-	if(ConfigType < SHAPE_CUBE)
-		ConfigType = SHAPE_CUBE;
-	else if(ConfigType > SHAPE_MIXED)
-		ConfigType = SHAPE_MIXED;
-	const int SizeMinValue = std::min((int)g_Config.m_Bc3dParticlesSizeMin, (int)g_Config.m_Bc3dParticlesSizeMax);
-	const int SizeMaxValue = std::max((int)g_Config.m_Bc3dParticlesSizeMin, (int)g_Config.m_Bc3dParticlesSizeMax);
-	const float SizeMin = (float)SizeMinValue;
-	const float SizeMax = (float)SizeMaxValue;
-	const float Speed = (float)g_Config.m_Bc3dParticlesSpeed;
-
-	for(int i = 0; i < SpawnNow; i++)
-	{
-		SParticle P;
-		const int Type = PickType(ConfigType);
-		P.m_Type = Type;
-		P.m_Size = random_float(SizeMin, SizeMax);
-
-		ColorRGBA BaseColor = color_cast<ColorRGBA>(ColorHSLA(g_Config.m_Bc3dParticlesColor));
-		if(g_Config.m_Bc3dParticlesColorMode == 2)
-		{
-			const ColorHSLA RandomColor(random_float(), 0.85f, 0.65f, BaseColor.a);
-			BaseColor = color_cast<ColorRGBA>(RandomColor);
-		}
-		P.m_Color = BaseColor;
-
-		bool Found = false;
-		for(int Try = 0; Try < 12; Try++)
-		{
-			const float Relax = Try >= 8 ? 0.5f : (Try >= 4 ? 0.75f : 1.0f);
-			const float MinDistSq = MinSpacingSq * Relax * Relax;
-			const vec2 Candidate(random_float(SpawnMinX, SpawnMaxX), random_float(SpawnMinY, SpawnMaxY));
-			if(IsPositionFree(Candidate, MinDistSq))
-			{
-				P.m_Pos = vec3(Candidate.x, Candidate.y, random_float(-Depth, Depth));
-				Found = true;
-				break;
-			}
-		}
-		if(!Found)
-		{
-			P.m_Pos = vec3(
-				random_float(SpawnMinX, SpawnMaxX),
-				random_float(SpawnMinY, SpawnMaxY),
-				random_float(-Depth, Depth));
-		}
-
-		vec3 Dir(random_float(-1.0f, 1.0f), random_float(-1.0f, 1.0f), 0.0f);
-		const float DirLen = length(Dir);
-		if(DirLen < 0.001f)
-			Dir = vec3(1.0f, 0.0f, 0.0f);
-		else
-			Dir /= DirLen;
-		P.m_Vel = Dir * Speed;
-
-		P.m_Rot = vec3(random_float(-0.35f, 0.35f), random_float(-0.35f, 0.35f), random_float(0.0f, 2.0f * pi));
-		P.m_RotVel = vec3(random_float(-0.08f, 0.08f), random_float(-0.08f, 0.08f), random_float(-0.2f, 0.2f));
-
-		const vec3 SpawnDir = normalize(vec3(random_float(-1.0f, 1.0f), random_float(-1.0f, 1.0f), random_float(-0.5f, 0.5f)) + vec3(0.001f, 0.0f, 0.0f));
-		const vec3 FadeDir = normalize(vec3(random_float(-1.0f, 1.0f), random_float(-1.0f, 1.0f), random_float(-0.5f, 0.5f)) + vec3(0.001f, 0.0f, 0.0f));
-		P.m_SpawnOffset = SpawnDir * (P.m_Size * random_float(0.35f, 0.85f));
-		P.m_FadeOutOffset = FadeDir * (P.m_Size * random_float(0.55f, 1.1f));
-		P.m_SpawnTime = m_Time;
-		P.m_FadeOutStart = 0.0f;
-		P.m_FadingOut = false;
-
-		m_vParticles.push_back(P);
-	}
-
-	RenderParticles(ViewMinX, ViewMaxX, ViewMinY, ViewMaxY, BaseAlpha, FadeIn, FadeOut);
+	RenderParticles(RenderMinX, RenderMaxX, RenderMinY, RenderMaxY, BaseAlpha);
 }
 
-void C3DParticles::RenderParticles(float ViewMinX, float ViewMaxX, float ViewMinY, float ViewMaxY, float BaseAlpha, float FadeIn, float FadeOut)
+void C3DParticles::RenderParticles(float CullMinX, float CullMaxX, float CullMinY, float CullMaxY, float BaseAlpha)
 {
 	if(m_vParticles.empty())
 		return;
@@ -499,42 +448,8 @@ void C3DParticles::RenderParticles(float ViewMinX, float ViewMaxX, float ViewMin
 	Graphics()->TextureClear();
 
 	const bool GlowEnabled = g_Config.m_Bc3dParticlesGlow != 0;
-	const float GlowAlpha = std::clamp(g_Config.m_Bc3dParticlesGlowAlpha / 100.0f, 0.0f, 1.0f);
-	const float GlowOffset = (float)g_Config.m_Bc3dParticlesGlowOffset;
-	const vec3 GlowOffsetVec(-GlowOffset, -GlowOffset, 0.0f);
-
-	auto GetRenderParams = [&](const SParticle &Part, float AlphaMul, const vec3 &ExtraOffset, vec3 &OutPos, float &OutSize, float &OutAlpha) {
-		if(Part.m_Pos.x < ViewMinX || Part.m_Pos.x > ViewMaxX || Part.m_Pos.y < ViewMinY || Part.m_Pos.y > ViewMaxY)
-			return false;
-
-		const float InT = FadeIn > 0.0f ? std::clamp((m_Time - Part.m_SpawnTime) / FadeIn, 0.0f, 1.0f) : 1.0f;
-		const float OutT = Part.m_FadingOut ? (FadeOut > 0.0f ? std::clamp((m_Time - Part.m_FadeOutStart) / FadeOut, 0.0f, 1.0f) : 1.0f) : 0.0f;
-		const float Out = Part.m_FadingOut ? (1.0f - OutT) : 1.0f;
-		const float Alpha = BaseAlpha * InT * Out * AlphaMul;
-		if(Alpha <= 0.0f)
-			return false;
-
-		const float InEase = InT * InT * (3.0f - 2.0f * InT);
-		const float OutEase = OutT * OutT * (3.0f - 2.0f * OutT);
-
-		float Scale = 1.0f;
-		vec3 Offset(0.0f, 0.0f, 0.0f);
-
-		const float Pop = 1.0f + 0.2f * std::sin(InEase * pi);
-		Scale *= mix(0.55f, 1.0f, InEase) * Pop;
-		Offset += Part.m_SpawnOffset * (1.0f - InEase);
-
-		if(Part.m_FadingOut)
-		{
-			Offset += Part.m_FadeOutOffset * OutEase;
-			Scale *= std::pow(Out, 1.25f);
-		}
-
-		OutPos = Part.m_Pos + Offset + ExtraOffset;
-		OutSize = Part.m_Size * Scale;
-		OutAlpha = Alpha;
-		return OutAlpha > 0.0f && OutSize > 0.01f;
-	};
+	const vec3 GlowOffsetVec(-GLOW_OFFSET, -GLOW_OFFSET, 0.0f);
+	const vec2 CameraCenter = GameClient()->m_Camera.m_Center;
 
 	auto DrawCube = [&](const SParticle &Part, const vec3 &RenderPos, float RenderSize, float FinalAlpha) {
 		Graphics()->SetColor(ColorRGBA(Part.m_Color.r, Part.m_Color.g, Part.m_Color.b, Part.m_Color.a * FinalAlpha));
@@ -544,8 +459,7 @@ void C3DParticles::RenderParticles(float ViewMinX, float ViewMaxX, float ViewMin
 		for(size_t i = 0; i < g_aCubeVertices.size(); i++)
 		{
 			const vec3 Local = g_aCubeVertices[i] * RenderSize;
-			const vec3 V = RotateVec3(Local, Rot) + RenderPos;
-			aProjected[i] = ProjectPoint(V, GameClient()->m_Camera.m_Center);
+			aProjected[i] = ProjectPoint(RotateVec3(Local, Rot) + RenderPos, CameraCenter);
 		}
 
 		std::array<IGraphics::CLineItem, g_aCubeEdges.size()> aLines;
@@ -561,93 +475,57 @@ void C3DParticles::RenderParticles(float ViewMinX, float ViewMaxX, float ViewMin
 		Graphics()->SetColor(ColorRGBA(Part.m_Color.r, Part.m_Color.g, Part.m_Color.b, Part.m_Color.a * FinalAlpha));
 
 		const SRotation Rot = MakeRotation(Part.m_Rot);
-		const auto &Verts = HeartLowVertices();
-		const float Scale = RenderSize * 0.055f;
-		const float LayerStep = HEART_LAYERS > 1 ? 2.0f / (float)(HEART_LAYERS - 1) : 0.0f;
-		std::array<std::array<vec2, HEART_LOW_POINTS>, HEART_LAYERS> aProjected;
-		std::array<float, HEART_LAYERS> aLayerZ;
+		const auto &Verts = HeartVertices();
+		const float Scale = RenderSize * HEART_SIZE_SCALE;
+		std::array<std::array<vec2, HEART_POINTS>, HEART_LAYERS> aProjected;
 		for(int L = 0; L < HEART_LAYERS; L++)
 		{
-			const float LayerT = -1.0f + LayerStep * (float)L;
+			const float LayerT = L == 0 ? -1.0f : 1.0f;
 			const float Z = LayerT * (RenderSize * HEART_THICKNESS);
-			aLayerZ[L] = Z;
-			const float LayerScale = 1.0f - std::abs(LayerT) * 0.08f;
-			for(int i = 0; i < HEART_LOW_POINTS; i++)
+			const float LayerScale = 1.0f - std::abs(LayerT) * 0.06f;
+			for(int i = 0; i < HEART_POINTS; i++)
 			{
 				const vec3 Local = vec3(Verts[i].x * Scale * LayerScale, Verts[i].y * Scale * LayerScale, Z);
-				const vec3 V = RotateVec3(Local, Rot) + RenderPos;
-				aProjected[L][i] = ProjectPoint(V, GameClient()->m_Camera.m_Center);
+				aProjected[L][i] = ProjectPoint(RotateVec3(Local, Rot) + RenderPos, CameraCenter);
 			}
 		}
 
+		std::array<IGraphics::CLineItem, HEART_POINTS * 3> aLines;
+		size_t LineCount = 0;
 		for(int L = 0; L < HEART_LAYERS; L++)
 		{
-			std::array<IGraphics::CLineItem, HEART_LOW_POINTS> aRingLines;
-			for(int i = 0; i < HEART_LOW_POINTS; i++)
+			for(int i = 0; i < HEART_POINTS; i++)
 			{
-				const int Next = (i + 1) % HEART_LOW_POINTS;
-				aRingLines[i] = IGraphics::CLineItem(aProjected[L][i], aProjected[L][Next]);
+				const int Next = (i + 1) % HEART_POINTS;
+				aLines[LineCount++] = IGraphics::CLineItem(aProjected[L][i], aProjected[L][Next]);
 			}
-			Graphics()->LinesDraw(aRingLines.data(), aRingLines.size());
 		}
+		for(int i = 0; i < HEART_POINTS; i++)
+			aLines[LineCount++] = IGraphics::CLineItem(aProjected[0][i], aProjected[1][i]);
+		Graphics()->LinesDraw(aLines.data(), LineCount);
+	};
 
-		for(int L = 0; L < HEART_LAYERS - 1; L++)
-		{
-			std::array<IGraphics::CLineItem, HEART_LOW_POINTS> aVertical;
-			std::array<IGraphics::CLineItem, HEART_LOW_POINTS> aDiagonal;
-			for(int i = 0; i < HEART_LOW_POINTS; i++)
-			{
-				const int Next = (i + 1) % HEART_LOW_POINTS;
-				aVertical[i] = IGraphics::CLineItem(aProjected[L][i], aProjected[L + 1][i]);
-				aDiagonal[i] = IGraphics::CLineItem(aProjected[L][i], aProjected[L + 1][Next]);
-			}
-			Graphics()->LinesDraw(aVertical.data(), aVertical.size());
-			Graphics()->LinesDraw(aDiagonal.data(), aDiagonal.size());
-		}
+	auto DrawParticle = [&](const SParticle &Part, const vec3 &ExtraOffset, float AlphaMul) {
+		if(Part.m_Pos.x < CullMinX || Part.m_Pos.x > CullMaxX || Part.m_Pos.y < CullMinY || Part.m_Pos.y > CullMaxY)
+			return;
 
-		if(HEART_LAYERS >= 2)
-		{
-			const int Front = 0;
-			const int Back = HEART_LAYERS - 1;
-			const vec2 CenterFront = ProjectPoint(RotateVec3(vec3(0.0f, 0.0f, aLayerZ[Front]), Rot) + RenderPos, GameClient()->m_Camera.m_Center);
-			const vec2 CenterBack = ProjectPoint(RotateVec3(vec3(0.0f, 0.0f, aLayerZ[Back]), Rot) + RenderPos, GameClient()->m_Camera.m_Center);
-			std::array<IGraphics::CLineItem, HEART_LOW_POINTS> aFront;
-			std::array<IGraphics::CLineItem, HEART_LOW_POINTS> aBack;
-			for(int i = 0; i < HEART_LOW_POINTS; i++)
-			{
-				aFront[i] = IGraphics::CLineItem(CenterFront, aProjected[Front][i]);
-				aBack[i] = IGraphics::CLineItem(CenterBack, aProjected[Back][i]);
-			}
-			Graphics()->LinesDraw(aFront.data(), aFront.size());
-			Graphics()->LinesDraw(aBack.data(), aBack.size());
-		}
+		const float FinalAlpha = BaseAlpha * AlphaMul;
+		if(FinalAlpha <= 0.0f)
+			return;
+
+		const vec3 RenderPos = Part.m_Pos + ExtraOffset;
+		if(Part.m_Type == SHAPE_CUBE)
+			DrawCube(Part, RenderPos, Part.m_Size, FinalAlpha);
+		else
+			DrawHeart(Part, RenderPos, Part.m_Size, FinalAlpha);
 	};
 
 	Graphics()->LinesBegin();
 	for(const auto &Part : m_vParticles)
 	{
-		vec3 RenderPos;
-		float RenderSize;
-		float FinalAlpha;
-
-		if(GlowEnabled && GlowAlpha > 0.0f && GlowOffset > 0.0f)
-		{
-			if(GetRenderParams(Part, GlowAlpha, GlowOffsetVec, RenderPos, RenderSize, FinalAlpha))
-			{
-				if(Part.m_Type == SHAPE_CUBE)
-					DrawCube(Part, RenderPos, RenderSize, FinalAlpha);
-				else
-					DrawHeart(Part, RenderPos, RenderSize, FinalAlpha);
-			}
-		}
-
-		if(GetRenderParams(Part, 1.0f, vec3(0.0f, 0.0f, 0.0f), RenderPos, RenderSize, FinalAlpha))
-		{
-			if(Part.m_Type == SHAPE_CUBE)
-				DrawCube(Part, RenderPos, RenderSize, FinalAlpha);
-			else
-				DrawHeart(Part, RenderPos, RenderSize, FinalAlpha);
-		}
+		if(GlowEnabled)
+			DrawParticle(Part, GlowOffsetVec, GLOW_ALPHA);
+		DrawParticle(Part, vec3(0.0f, 0.0f, 0.0f), 1.0f);
 	}
 	Graphics()->LinesEnd();
 }

@@ -8,12 +8,15 @@
 
 #include <engine/console.h>
 #include <engine/serverbrowser.h>
-#include <engine/shared/memheap.h>
 
+#include <deque>
 #include <functional>
 #include <map>
 #include <optional>
 #include <set>
+#include <string>
+#include <unordered_map>
+#include <utility>
 
 typedef struct _json_value json_value;
 class CNetClient;
@@ -254,6 +257,7 @@ public:
 	~CServerBrowser() override;
 
 	// interface functions
+	void Shutdown() override;
 	void Refresh(int Type, bool Force = false) override;
 	bool IsRefreshing() const override;
 	bool IsGettingServerlist() const override;
@@ -275,9 +279,14 @@ public:
 	void LoadDDNetServers();
 	void UpdateServerFilteredPlayers(CServerInfo *pInfo) const;
 	void UpdateServerFriends(CServerInfo *pInfo) const;
+	// bestclient
+	void UpdateServerBestClients(CServerInfo *pInfo) const;
+	void SetBestClientPlayers(const std::vector<CBestClientPlayerEntry> &vPlayers) override;
+	// bestclient
 	void UpdateServerCommunity(CServerInfo *pInfo) const;
 	void UpdateServerRank(CServerInfo *pInfo) const;
-	void UpdateServerBestClients(CServerInfo *pInfo) const;
+	void UpdateServerLatency(CServerInfo *pInfo, int OwnLocation) const;
+	int DetermineOwnLocation() const;
 	void ValidateServerlistType();
 	const char *GetTutorialServer() override;
 
@@ -318,7 +327,6 @@ public:
 	CServerEntry *Find(const NETADDR &Addr) override;
 	int GetCurrentType() override { return m_ServerlistType; }
 	bool IsRegistered(const NETADDR &Addr);
-	void SetBestClientPlayers(const std::vector<CBestClientPlayerEntry> &vPlayers) override;
 
 private:
 	CNetClient *m_pNetClient = nullptr;
@@ -332,20 +340,23 @@ private:
 	char m_aNetVersion[128];
 
 	bool m_RefreshingHttp = false;
-	bool m_PingCacheLoaded = false;
 	IServerBrowserHttp *m_pHttp = nullptr;
 	IServerBrowserPingCache *m_pPingCache = nullptr;
 	const char *m_pHttpPrevBestUrl = nullptr;
 
-	CHeap m_ServerlistHeap;
+	// Entries are owned by m_ServerlistStorage; m_vpServerlist holds non-owning
+	// pointers into it. std::deque keeps element pointers stable across growth,
+	// which the request list (m_pPrevReq/m_pNextReq) and m_vpServerlist rely on.
+	std::deque<CServerEntry> m_ServerlistStorage;
 	std::vector<CServerEntry *> m_vpServerlist;
 	std::vector<int> m_vSortedServerlist;
 	std::unordered_map<NETADDR, int> m_ByAddr;
 
 	std::vector<CCommunity> m_vCommunities;
 	std::unordered_map<NETADDR, CCommunityServer> m_CommunityServersByAddr;
-
-	std::unordered_map<std::string, std::unordered_map<std::string, bool>> m_BestClientPlayersByServer;
+	// bestclient
+	std::unordered_map<std::string, std::unordered_map<std::string, std::pair<bool, bool>>> m_BestClientPlayersByServer;
+	// bestclient
 
 	int m_OwnLocation = CServerInfo::LOC_UNKNOWN;
 
@@ -371,7 +382,6 @@ private:
 	int m_NumSortedPlayers;
 
 	int m_ServerlistType;
-	int m_HttpRefreshGeneration = 0;
 	int64_t m_BroadcastTime;
 	unsigned char m_aTokenSeed[16];
 
@@ -387,8 +397,11 @@ private:
 	bool SortCompareNumPlayers(int Index1, int Index2) const;
 	bool SortCompareNumClients(int Index1, int Index2) const;
 	bool SortCompareNumFriends(int Index1, int Index2) const;
+	// bestclient
 	bool SortCompareNumBestClientPlayers(int Index1, int Index2) const;
+	// bestclient
 	bool SortCompareNumPlayersAndPing(int Index1, int Index2) const;
+	bool SortCompareFavoritesNumPlayersAndPing(int Index1, int Index2) const;
 
 	//
 	void Filter();
@@ -396,9 +409,6 @@ private:
 	int SortHash() const;
 
 	void CleanUp();
-
-	int DetermineOwnLocation() const;
-	void UpdateServerLatency(CServerInfo *pInfo, int OwnLocation) const;
 
 	void UpdateFromHttp();
 	CServerEntry *Add(const NETADDR *pAddrs, int NumAddrs);

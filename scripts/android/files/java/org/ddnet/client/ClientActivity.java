@@ -3,17 +3,11 @@ package org.ddnet.client;
 import android.app.NativeActivity;
 import android.content.*;
 import android.content.pm.ActivityInfo;
-import android.net.Uri;
 import android.os.*;
-import android.provider.Settings;
-import android.util.Log;
 
 import androidx.core.content.ContextCompat;
-import androidx.core.content.FileProvider;
 
 import org.libsdl.app.SDLActivity;
-
-import java.io.File;
 
 public class ClientActivity extends SDLActivity {
 
@@ -102,23 +96,14 @@ public class ClientActivity extends SDLActivity {
 	}
 
 	// Called from native code, see android_main.cpp
-	public boolean startServer(String[] arguments) {
+	public void startServer(String[] arguments) {
 		synchronized(serverServiceMonitor) {
 			if(serverServiceMessenger != null) {
-				return true;
+				return;
 			}
 			Intent startIntent = ServerService.createStartIntent(this, arguments);
-			try {
-				ContextCompat.startForegroundService(this, startIntent);
-				if(!bindService(startIntent, serverServiceConnection, 0)) {
-					stopService(startIntent);
-					return false;
-				}
-				return true;
-			} catch(RuntimeException e) {
-				Log.e("DDNet", "Failed to start local server service", e);
-				return false;
-			}
+			ContextCompat.startForegroundService(this, startIntent);
+			bindService(startIntent, serverServiceConnection, 0);
 		}
 	}
 
@@ -142,26 +127,5 @@ public class ClientActivity extends SDLActivity {
 		synchronized(serverServiceMonitor) {
 			return serverServiceMessenger != null;
 		}
-	}
-
-	// Called from native code, see android_main.cpp
-	public boolean installApk(String apkPath) {
-		if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
-			Intent permissionIntent = new Intent(
-				Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-				Uri.parse("package:" + getPackageName())
-			);
-			permissionIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-			startActivity(permissionIntent);
-			return false;
-		}
-
-		Uri apkUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", new File(apkPath));
-
-		Intent installIntent = new Intent(Intent.ACTION_VIEW);
-		installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
-		installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
-		startActivity(installIntent);
-		return true;
 	}
 }

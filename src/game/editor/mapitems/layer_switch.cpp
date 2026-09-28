@@ -36,8 +36,8 @@ void CLayerSwitch::Resize(int NewW, int NewH)
 	mem_zero(pNewSwitchData, (size_t)NewW * NewH * sizeof(CSwitchTile));
 
 	// copy old data
-	for(int y = 0; y < minimum(NewH, m_Height); y++)
-		mem_copy(&pNewSwitchData[y * NewW], &m_pSwitchTile[y * m_Width], minimum(m_Width, NewW) * sizeof(CSwitchTile));
+	for(int y = 0; y < std::min(NewH, m_Height); y++)
+		mem_copy(&pNewSwitchData[y * NewW], &m_pSwitchTile[y * m_Width], std::min(m_Width, NewW) * sizeof(CSwitchTile));
 
 	// replace old
 	delete[] m_pSwitchTile;
@@ -171,20 +171,6 @@ void CLayerSwitch::BrushDraw(CLayer *pBrush, vec2 WorldPos)
 				m_pTiles[TgtIndex].m_Index};
 
 			RecordStateChange(fx, fy, Previous, Current);
-
-			if(Editor()->m_MultiMappingSession.IsLive())
-			{
-				int GroupIdx = -1, LayerIdx = -1;
-				Editor()->m_MultiMappingSession.FindGroupAndLayer(this, GroupIdx, LayerIdx);
-				if(GroupIdx >= 0)
-					Editor()->m_MultiMappingSession.NotifyTileEditSwitch(GroupIdx, LayerIdx, fx, fy,
-						m_pTiles[TgtIndex].m_Index,
-						m_pTiles[TgtIndex].m_Flags,
-						m_pSwitchTile[TgtIndex].m_Number,
-						m_pSwitchTile[TgtIndex].m_Type,
-						m_pSwitchTile[TgtIndex].m_Flags,
-						m_pSwitchTile[TgtIndex].m_Delay);
-			}
 		}
 	FlagModified(sx, sy, pSwitchLayer->m_Width, pSwitchLayer->m_Height);
 }
@@ -211,13 +197,13 @@ void CLayerSwitch::BrushFlipY()
 
 void CLayerSwitch::BrushRotate(float Amount)
 {
-	int Rotation = (round_to_int(360.0f * Amount / (pi * 2)) / 90) % 4; // 0=0В°, 1=90В°, 2=180В°, 3=270В°
+	int Rotation = (round_to_int(360.0f * Amount / (pi * 2)) / 90) % 4; // 0=0°, 1=90°, 2=180°, 3=270°
 	if(Rotation < 0)
 		Rotation += 4;
 
 	if(Rotation == 1 || Rotation == 3)
 	{
-		// 90В° rotation
+		// 90° rotation
 		CSwitchTile *pTempData1 = new CSwitchTile[m_Width * m_Height];
 		CTile *pTempData2 = new CTile[m_Width * m_Height];
 		mem_copy(pTempData1, m_pSwitchTile, (size_t)m_Width * m_Height * sizeof(CSwitchTile));
@@ -340,20 +326,6 @@ void CLayerSwitch::FillSelection(bool Empty, CLayer *pBrush, CUIRect Rect)
 				m_pTiles[TgtIndex].m_Index};
 
 			RecordStateChange(fx, fy, Previous, Current);
-
-			if(Editor()->m_MultiMappingSession.IsLive())
-			{
-				int GroupIdx = -1, LayerIdx = -1;
-				Editor()->m_MultiMappingSession.FindGroupAndLayer(this, GroupIdx, LayerIdx);
-				if(GroupIdx >= 0)
-					Editor()->m_MultiMappingSession.NotifyTileEditSwitch(GroupIdx, LayerIdx, fx, fy,
-						m_pTiles[TgtIndex].m_Index,
-						m_pTiles[TgtIndex].m_Flags,
-						m_pSwitchTile[TgtIndex].m_Number,
-						m_pSwitchTile[TgtIndex].m_Type,
-						m_pSwitchTile[TgtIndex].m_Flags,
-						m_pSwitchTile[TgtIndex].m_Delay);
-			}
 		}
 	}
 	FlagModified(sx, sy, w, h);

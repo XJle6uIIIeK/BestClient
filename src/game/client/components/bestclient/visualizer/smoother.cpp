@@ -5,6 +5,33 @@
 
 #include <algorithm>
 
+template<typename T>
+constexpr T minimum(T a, T b)
+{
+	return (std::min)(a, b);
+}
+
+template<typename T>
+constexpr T maximum(T a, T b)
+{
+	return (std::max)(a, b);
+}
+
+template<typename T>
+constexpr T minimum(T a, T b, T c)
+{
+	return (std::min)(a, (std::min)(b, c));
+}
+
+template<typename T>
+constexpr T maximum(T a, T b, T c)
+{
+	return (std::max)(a, (std::max)(b, c));
+}
+
+
+#include <algorithm>
+
 namespace BestClientVisualizer
 {
 
@@ -29,8 +56,6 @@ void CVisualizerSmoother::Configure(const SVisualizerConfig &Config)
 
 void CVisualizerSmoother::Process(const SVisualizerFrame &RawFrame, SVisualizerFrame &OutFrame)
 {
-	// Analyzer already applies attack/release + peak normalization.
-	// Keep this as a pass-through so we don't double-smooth.
 	OutFrame = RawFrame;
 	OutFrame.m_IsPassiveFallback = RawFrame.m_BackendStatus == EVisualizerBackendStatus::FALLBACK ||
 		RawFrame.m_BackendStatus == EVisualizerBackendStatus::UNAVAILABLE;

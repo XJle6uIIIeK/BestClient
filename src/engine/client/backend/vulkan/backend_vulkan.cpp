@@ -1,8 +1,10 @@
 #if defined(CONF_BACKEND_VULKAN)
 
+#include <base/dbg.h>
 #include <base/log.h>
-#include <base/math.h>
-#include <base/system.h>
+#include <base/mem.h>
+#include <base/str.h>
+#include <base/time.h>
 
 #include <engine/client/backend/backend_base.h>
 #include <engine/client/backend/vulkan/backend_vulkan.h>
@@ -20,8 +22,11 @@
 #include <vulkan/vulkan_core.h>
 
 #include <algorithm>
-#include <array>
+// bestclient
 #include <cmath>
+#include <game/client/components/bestclient/motion_blur.h>
+// bestclient
+#include <array>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdlib>
@@ -38,6 +43,11 @@
 #include <utility>
 #include <vector>
 
+// Set on render worker threads so that memory-allocation recovery (which drives
+// the frame loop and issues queue submit/present) is only ever attempted on the
+// main render thread. See AllocateVulkanMemory().
+static thread_local bool s_ThreadIsRenderWorker = false;
+
 #ifndef VK_API_VERSION_MAJOR
 #define VK_API_VERSION_MAJOR VK_VERSION_MAJOR
 #define VK_API_VERSION_MINOR VK_VERSION_MINOR
@@ -48,15 +58,12 @@ using namespace std::chrono_literals;
 
 class CCommandProcessorFragment_Vulkan : public CCommandProcessorFragment_GLBase
 {
-	enum EMemoryBlockUsage
+	enum class EMemoryBlockUsage
 	{
-		MEMORY_BLOCK_USAGE_TEXTURE = 0,
-		MEMORY_BLOCK_USAGE_BUFFER,
-		MEMORY_BLOCK_USAGE_STREAM,
-		MEMORY_BLOCK_USAGE_STAGING,
-
-		// whenever dummy is used, make sure to deallocate all memory
-		MEMORY_BLOCK_USAGE_DUMMY,
+		TEXTURE,
+		BUFFER,
+		STREAM,
+		STAGING,
 	};
 
 	[[nodiscard]] bool IsVerbose()
@@ -64,22 +71,17 @@ class CCommandProcessorFragment_Vulkan : public CCommandProcessorFragment_GLBase
 		return g_Config.m_DbgGfx == DEBUG_GFX_MODE_VERBOSE || g_Config.m_DbgGfx == DEBUG_GFX_MODE_ALL;
 	}
 
-	[[nodiscard]] bool IsFrameBlendEnabled()
-	{
-		return g_Config.m_BcMotionBlur != 0 && g_Config.m_BcMotionBlurStrength > 0;
-	}
-
 	static const char *MemoryUsageName(EMemoryBlockUsage MemUsage)
 	{
 		switch(MemUsage)
 		{
-		case MEMORY_BLOCK_USAGE_TEXTURE:
+		case EMemoryBlockUsage::TEXTURE:
 			return "texture";
-		case MEMORY_BLOCK_USAGE_BUFFER:
+		case EMemoryBlockUsage::BUFFER:
 			return "buffer";
-		case MEMORY_BLOCK_USAGE_STREAM:
+		case EMemoryBlockUsage::STREAM:
 			return "stream";
-		case MEMORY_BLOCK_USAGE_STAGING:
+		case EMemoryBlockUsage::STAGING:
 			return "staging buffer";
 		default:
 			dbg_assert_failed("Invalid MemUsage: %d", (int)MemUsage);
@@ -435,7 +437,9 @@ class CCommandProcessorFragment_Vulkan : public CCommandProcessorFragment_GLBase
 								break;
 						}
 						else
+						{
 							++HeapIterator;
+						}
 					}
 				}
 			}
@@ -860,14 +864,9 @@ class CCommandProcessorFragment_Vulkan : public CCommandProcessorFragment_GLBase
 		VkImageView m_ImgView = VK_NULL_HANDLE;
 	};
 
-	struct SFrameBlendImage
-	{
-		VkImage m_Image = VK_NULL_HANDLE;
-		SMemoryImageBlock<IMAGE_BUFFER_CACHE_ID> m_ImgMem;
-		VkImageView m_ImgView = VK_NULL_HANDLE;
-		SDeviceDescriptorSet m_DescriptorSet;
-		bool m_Valid = false;
-	};
+	// bestclient
+#include <game/client/components/bestclient/motion_blur_vulkan_members.inl>
+	// bestclient
 
 	/************************
 	 * MEMBER VARIABLES
@@ -972,17 +971,15 @@ class CCommandProcessorFragment_Vulkan : public CCommandProcessorFragment_GLBase
 private:
 	std::vector<VkImageView> m_vSwapChainImageViewList;
 	std::vector<SSwapChainMultiSampleImage> m_vSwapChainMultiSamplingImages;
-	std::vector<SFrameBlendImage> m_vFrameBlendImages;
+	// bestclient
+#include <game/client/components/bestclient/motion_blur_vulkan_state.inl>
+	// bestclient
 	std::vector<VkFramebuffer> m_vFramebufferList;
 	std::vector<VkCommandBuffer> m_vMainDrawCommandBuffers;
 
 	std::vector<std::vector<VkCommandBuffer>> m_vvThreadDrawCommandBuffers;
 	std::vector<VkCommandBuffer> m_vHelperThreadDrawCommandBuffers;
 	std::vector<std::vector<bool>> m_vvUsedThreadDrawCommandBuffer;
-	// secondary command buffers for the frame blend quad: with multiple render threads the
-	// render pass uses VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS, so inline draws into
-	// the primary command buffer are not allowed there
-	std::vector<VkCommandBuffer> m_vFrameBlendCommandBuffers;
 
 	std::vector<VkCommandBuffer> m_vMemoryCommandBuffers;
 	std::vector<bool> m_vUsedMemoryCommandBuffer;
@@ -997,7 +994,6 @@ private:
 	std::vector<uint64_t> m_vImageLastFrameCheck;
 
 	uint32_t m_LastPresentedSwapChainImageIndex;
-	bool m_FrameBlendEnabledLastFrame = false;
 
 	std::vector<SBufferObjectFrame> m_vBufferObjects;
 
@@ -1013,6 +1009,14 @@ private:
 
 #ifdef VK_EXT_debug_utils
 	VkDebugUtilsMessengerEXT m_DebugMessenger;
+#endif
+
+#ifdef VK_EXT_device_fault
+	// Optional VK_EXT_device_fault support. When the driver exposes the extension
+	// we enable it so that a VK_ERROR_DEVICE_LOST can be followed up with detailed
+	// fault information (faulting GPU addresses and vendor specific fault codes).
+	bool m_DeviceFaultAvailable = false;
+	PFN_vkGetDeviceFaultInfoEXT m_pfnGetDeviceFaultInfoEXT = nullptr;
 #endif
 
 	VkDescriptorSetLayout m_StandardTexturedDescriptorSetLayout;
@@ -1167,6 +1171,63 @@ protected:
 		m_Warning.m_WarningType = WarningType;
 	}
 
+#ifdef VK_EXT_device_fault
+	static const char *DeviceFaultAddressTypeName(VkDeviceFaultAddressTypeEXT Type)
+	{
+		switch(Type)
+		{
+		case VK_DEVICE_FAULT_ADDRESS_TYPE_NONE_EXT: return "none";
+		case VK_DEVICE_FAULT_ADDRESS_TYPE_READ_INVALID_EXT: return "read_invalid";
+		case VK_DEVICE_FAULT_ADDRESS_TYPE_WRITE_INVALID_EXT: return "write_invalid";
+		case VK_DEVICE_FAULT_ADDRESS_TYPE_EXECUTE_INVALID_EXT: return "execute_invalid";
+		case VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_UNKNOWN_EXT: return "instruction_pointer_unknown";
+		case VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_INVALID_EXT: return "instruction_pointer_invalid";
+		case VK_DEVICE_FAULT_ADDRESS_TYPE_INSTRUCTION_POINTER_FAULT_EXT: return "instruction_pointer_fault";
+		default: return "unknown";
+		}
+	}
+
+	// Queries and logs VK_EXT_device_fault information. Safe to call unconditionally:
+	// it is a no-op unless the extension was enabled at device creation.
+	void LogDeviceFaultInfo()
+	{
+		if(!m_DeviceFaultAvailable || m_pfnGetDeviceFaultInfoEXT == nullptr)
+			return;
+
+		VkDeviceFaultCountsEXT FaultCounts = {};
+		FaultCounts.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT;
+		if(m_pfnGetDeviceFaultInfoEXT(m_VKDevice, &FaultCounts, nullptr) != VK_SUCCESS)
+			return;
+
+		std::vector<VkDeviceFaultAddressInfoEXT> vAddressInfos(FaultCounts.addressInfoCount);
+		std::vector<VkDeviceFaultVendorInfoEXT> vVendorInfos(FaultCounts.vendorInfoCount);
+
+		VkDeviceFaultInfoEXT FaultInfo = {};
+		FaultInfo.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT;
+		FaultInfo.pAddressInfos = vAddressInfos.data();
+		FaultInfo.pVendorInfos = vVendorInfos.data();
+		// We do not request the (potentially large) vendor binary crash dump here.
+		// pVendorBinaryData stays null, so the size passed to the driver must be zero.
+		FaultCounts.vendorBinarySize = 0;
+		if(m_pfnGetDeviceFaultInfoEXT(m_VKDevice, &FaultCounts, &FaultInfo) != VK_SUCCESS)
+			return;
+
+		log_error("gfx/vulkan", "Device fault info (VK_EXT_device_fault): %s", FaultInfo.description);
+		for(uint32_t i = 0; i < FaultCounts.addressInfoCount; ++i)
+		{
+			const VkDeviceFaultAddressInfoEXT &Info = vAddressInfos[i];
+			log_error("gfx/vulkan", "  address fault: type=%s reportedAddress=0x%" PRIx64 " precision=0x%" PRIx64,
+				DeviceFaultAddressTypeName(Info.addressType), (uint64_t)Info.reportedAddress, (uint64_t)Info.addressPrecision);
+		}
+		for(uint32_t i = 0; i < FaultCounts.vendorInfoCount; ++i)
+		{
+			const VkDeviceFaultVendorInfoEXT &Info = vVendorInfos[i];
+			log_error("gfx/vulkan", "  vendor fault: %s code=0x%" PRIx64 " data=0x%" PRIx64,
+				Info.description, (uint64_t)Info.vendorFaultCode, (uint64_t)Info.vendorFaultData);
+		}
+	}
+#endif
+
 	const char *CheckVulkanCriticalError(VkResult CallResult)
 	{
 		const char *pCriticalError = nullptr;
@@ -1183,6 +1244,11 @@ protected:
 		case VK_ERROR_DEVICE_LOST:
 			pCriticalError = "Device lost.";
 			log_error("gfx/vulkan", "%s", pCriticalError);
+#ifdef VK_EXT_device_fault
+			LogDeviceFaultInfo();
+#else
+			log_error("gfx/vulkan", "Detailed fault info unavailable: built without VK_EXT_device_fault support (Vulkan headers too old).");
+#endif
 			break;
 		case VK_ERROR_OUT_OF_DATE_KHR:
 		{
@@ -1254,6 +1320,7 @@ protected:
 		m_aCommandCallbacks[CommandBufferCMDOff(CCommandBuffer::CMD_TEXT_TEXTURES_CREATE)] = {false, [](SRenderCommandExecuteBuffer &ExecBuffer, const CCommandBuffer::SCommand *pBaseCommand) {}, [this](const CCommandBuffer::SCommand *pBaseCommand, SRenderCommandExecuteBuffer &ExecBuffer) { return Cmd_TextTextures_Create(static_cast<const CCommandBuffer::SCommand_TextTextures_Create *>(pBaseCommand)); }};
 		m_aCommandCallbacks[CommandBufferCMDOff(CCommandBuffer::CMD_TEXT_TEXTURES_DESTROY)] = {false, [](SRenderCommandExecuteBuffer &ExecBuffer, const CCommandBuffer::SCommand *pBaseCommand) {}, [this](const CCommandBuffer::SCommand *pBaseCommand, SRenderCommandExecuteBuffer &ExecBuffer) { return Cmd_TextTextures_Destroy(static_cast<const CCommandBuffer::SCommand_TextTextures_Destroy *>(pBaseCommand)); }};
 		m_aCommandCallbacks[CommandBufferCMDOff(CCommandBuffer::CMD_TEXT_TEXTURE_UPDATE)] = {false, [](SRenderCommandExecuteBuffer &ExecBuffer, const CCommandBuffer::SCommand *pBaseCommand) {}, [this](const CCommandBuffer::SCommand *pBaseCommand, SRenderCommandExecuteBuffer &ExecBuffer) { return Cmd_TextTexture_Update(static_cast<const CCommandBuffer::SCommand_TextTexture_Update *>(pBaseCommand)); }};
+		m_aCommandCallbacks[CommandBufferCMDOff(CCommandBuffer::CMD_TEXTURE_UPDATE)] = {false, [](SRenderCommandExecuteBuffer &ExecBuffer, const CCommandBuffer::SCommand *pBaseCommand) {}, [this](const CCommandBuffer::SCommand *pBaseCommand, SRenderCommandExecuteBuffer &ExecBuffer) { return Cmd_Texture_Update(static_cast<const CCommandBuffer::SCommand_Texture_Update *>(pBaseCommand)); }};
 
 		m_aCommandCallbacks[CommandBufferCMDOff(CCommandBuffer::CMD_CLEAR)] = {true, [this](SRenderCommandExecuteBuffer &ExecBuffer, const CCommandBuffer::SCommand *pBaseCommand) { Cmd_Clear_FillExecuteBuffer(ExecBuffer, static_cast<const CCommandBuffer::SCommand_Clear *>(pBaseCommand)); }, [this](const CCommandBuffer::SCommand *pBaseCommand, SRenderCommandExecuteBuffer &ExecBuffer) { return Cmd_Clear(ExecBuffer, static_cast<const CCommandBuffer::SCommand_Clear *>(pBaseCommand)); }};
 		m_aCommandCallbacks[CommandBufferCMDOff(CCommandBuffer::CMD_RENDER)] = {true, [this](SRenderCommandExecuteBuffer &ExecBuffer, const CCommandBuffer::SCommand *pBaseCommand) { Cmd_Render_FillExecuteBuffer(ExecBuffer, static_cast<const CCommandBuffer::SCommand_Render *>(pBaseCommand)); }, [this](const CCommandBuffer::SCommand *pBaseCommand, SRenderCommandExecuteBuffer &ExecBuffer) { return Cmd_Render(static_cast<const CCommandBuffer::SCommand_Render *>(pBaseCommand), ExecBuffer); }};
@@ -1497,7 +1564,7 @@ protected:
 			MemRange.size = VK_WHOLE_SIZE;
 			vkInvalidateMappedMemoryRanges(m_VKDevice, 1, &MemRange);
 
-			size_t RealFullImageSize = maximum(ImageTotalSize, (size_t)(Height * m_GetPresentedImgDataHelperMappedLayoutPitch));
+			size_t RealFullImageSize = std::max(ImageTotalSize, (size_t)(Height * m_GetPresentedImgDataHelperMappedLayoutPitch));
 			size_t ExtraRowSize = Width * 4;
 			if(vDstData.size() < RealFullImageSize + ExtraRowSize)
 				vDstData.resize(RealFullImageSize + ExtraRowSize);
@@ -1564,7 +1631,16 @@ protected:
 		if(Res != VK_SUCCESS)
 		{
 			log_warn("gfx/vulkan", "Memory allocation failed, trying to recover.");
-			if(Res == VK_ERROR_OUT_OF_HOST_MEMORY || Res == VK_ERROR_OUT_OF_DEVICE_MEMORY)
+			// The recovery below advances the frame loop (vkDeviceWaitIdle +
+			// NextFrame -> WaitFrame -> FinishRenderThreads -> queue submit/present)
+			// to free delayed-cleanup resources and retry. That is only valid on
+			// the main render thread. On a render worker thread it would wait on
+			// the worker executing it (and re-lock that worker's own mutex),
+			// deadlocking the renderer, and issue queue operations concurrently
+			// with the main thread (-> VK_ERROR_DEVICE_LOST). From a worker we
+			// therefore fail cleanly; the failing allocation's caller reports an
+			// out-of-memory error and the main thread handles it.
+			if((Res == VK_ERROR_OUT_OF_HOST_MEMORY || Res == VK_ERROR_OUT_OF_DEVICE_MEMORY) && !s_ThreadIsRenderWorker)
 			{
 				// aggressively try to get more memory
 				vkDeviceWaitIdle(m_VKDevice);
@@ -1615,10 +1691,10 @@ protected:
 			}
 			if(!FoundAllocation)
 			{
-				typename SMemoryBlockCache<Id>::SMemoryCacheType::SMemoryCacheHeap *pNewHeap = new typename SMemoryBlockCache<Id>::SMemoryCacheType::SMemoryCacheHeap();
+				typename SMemoryBlockCache<Id>::SMemoryCacheType::SMemoryCacheHeap *pNewHeap = new SMemoryBlockCache<Id>::SMemoryCacheType::SMemoryCacheHeap();
 
 				VkBuffer TmpBuffer;
-				if(!GetBufferImpl(MemoryBlockSize * BlockCount, RequiresMapping ? MEMORY_BLOCK_USAGE_STAGING : MEMORY_BLOCK_USAGE_BUFFER, TmpBuffer, TmpBufferMemory, BufferUsage, BufferProperties))
+				if(!GetBufferImpl(MemoryBlockSize * BlockCount, RequiresMapping ? EMemoryBlockUsage::STAGING : EMemoryBlockUsage::BUFFER, TmpBuffer, TmpBufferMemory, BufferUsage, BufferProperties))
 				{
 					delete pNewHeap;
 					return false;
@@ -1676,7 +1752,7 @@ protected:
 		{
 			VkBuffer TmpBuffer;
 			SDeviceMemoryBlock TmpBufferMemory;
-			if(!GetBufferImpl(RequiredSize, RequiresMapping ? MEMORY_BLOCK_USAGE_STAGING : MEMORY_BLOCK_USAGE_BUFFER, TmpBuffer, TmpBufferMemory, BufferUsage, BufferProperties))
+			if(!GetBufferImpl(RequiredSize, RequiresMapping ? EMemoryBlockUsage::STAGING : EMemoryBlockUsage::BUFFER, TmpBuffer, TmpBufferMemory, BufferUsage, BufferProperties))
 				return false;
 
 			void *pMapData = nullptr;
@@ -1702,12 +1778,12 @@ protected:
 
 	[[nodiscard]] bool GetStagingBuffer(SMemoryBlock<STAGING_BUFFER_CACHE_ID> &ResBlock, const void *pBufferData, VkDeviceSize RequiredSize)
 	{
-		return GetBufferBlockImpl<STAGING_BUFFER_CACHE_ID, 8 * 1024 * 1024, 3, true>(ResBlock, m_StagingBufferCache, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, pBufferData, RequiredSize, maximum<VkDeviceSize>(m_NonCoherentMemAlignment, 16));
+		return GetBufferBlockImpl<STAGING_BUFFER_CACHE_ID, 8 * 1024 * 1024, 3, true>(ResBlock, m_StagingBufferCache, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, pBufferData, RequiredSize, std::max(m_NonCoherentMemAlignment, (VkDeviceSize)16));
 	}
 
 	[[nodiscard]] bool GetStagingBufferImage(SMemoryBlock<STAGING_BUFFER_IMAGE_CACHE_ID> &ResBlock, const void *pBufferData, VkDeviceSize RequiredSize)
 	{
-		return GetBufferBlockImpl<STAGING_BUFFER_IMAGE_CACHE_ID, 8 * 1024 * 1024, 3, true>(ResBlock, m_StagingBufferCacheImage, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, pBufferData, RequiredSize, maximum<VkDeviceSize>(m_OptimalImageCopyMemAlignment, maximum<VkDeviceSize>(m_NonCoherentMemAlignment, 16)));
+		return GetBufferBlockImpl<STAGING_BUFFER_IMAGE_CACHE_ID, 8 * 1024 * 1024, 3, true>(ResBlock, m_StagingBufferCacheImage, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, pBufferData, RequiredSize, std::max({m_OptimalImageCopyMemAlignment, m_NonCoherentMemAlignment, (VkDeviceSize)16}));
 	}
 
 	template<size_t Id>
@@ -1775,7 +1851,7 @@ protected:
 
 	static size_t ImageMipLevelCount(size_t Width, size_t Height, size_t Depth)
 	{
-		return std::floor(std::log2(maximum(Width, maximum(Height, Depth)))) + 1;
+		return std::floor(std::log2(std::max({Width, Height, Depth}))) + 1;
 	}
 
 	static size_t ImageMipLevelCount(const VkExtent3D &ImgExtent)
@@ -1798,7 +1874,7 @@ protected:
 
 		if(IsVerbose())
 		{
-			VerboseAllocatedMemory(RequiredSize, m_CurImageIndex, MEMORY_BLOCK_USAGE_TEXTURE);
+			VerboseAllocatedMemory(RequiredSize, m_CurImageIndex, EMemoryBlockUsage::TEXTURE);
 		}
 
 		if(!AllocateVulkanMemory(&MemAllocInfo, &BufferMemory.m_Mem))
@@ -1807,7 +1883,7 @@ protected:
 			return false;
 		}
 
-		BufferMemory.m_UsageType = MEMORY_BLOCK_USAGE_TEXTURE;
+		BufferMemory.m_UsageType = EMemoryBlockUsage::TEXTURE;
 
 		return true;
 	}
@@ -1834,7 +1910,7 @@ protected:
 			}
 			if(!FoundAllocation)
 			{
-				typename SMemoryBlockCache<Id>::SMemoryCacheType::SMemoryCacheHeap *pNewHeap = new typename SMemoryBlockCache<Id>::SMemoryCacheType::SMemoryCacheHeap();
+				typename SMemoryBlockCache<Id>::SMemoryCacheType::SMemoryCacheHeap *pNewHeap = new SMemoryBlockCache<Id>::SMemoryCacheType::SMemoryCacheHeap();
 
 				if(!GetImageMemoryImpl(MemoryBlockSize * BlockCount, RequiredMemoryTypeBits, TmpBufferMemory, BufferProperties))
 				{
@@ -1962,13 +2038,13 @@ protected:
 		if(BufferMem.m_Mem != VK_NULL_HANDLE)
 		{
 			vkFreeMemory(m_VKDevice, BufferMem.m_Mem, nullptr);
-			if(BufferMem.m_UsageType == MEMORY_BLOCK_USAGE_BUFFER)
+			if(BufferMem.m_UsageType == EMemoryBlockUsage::BUFFER)
 				m_pBufferMemoryUsage->store(m_pBufferMemoryUsage->load(std::memory_order_relaxed) - BufferMem.m_Size, std::memory_order_relaxed);
-			else if(BufferMem.m_UsageType == MEMORY_BLOCK_USAGE_TEXTURE)
+			else if(BufferMem.m_UsageType == EMemoryBlockUsage::TEXTURE)
 				m_pTextureMemoryUsage->store(m_pTextureMemoryUsage->load(std::memory_order_relaxed) - BufferMem.m_Size, std::memory_order_relaxed);
-			else if(BufferMem.m_UsageType == MEMORY_BLOCK_USAGE_STREAM)
+			else if(BufferMem.m_UsageType == EMemoryBlockUsage::STREAM)
 				m_pStreamMemoryUsage->store(m_pStreamMemoryUsage->load(std::memory_order_relaxed) - BufferMem.m_Size, std::memory_order_relaxed);
-			else if(BufferMem.m_UsageType == MEMORY_BLOCK_USAGE_STAGING)
+			else if(BufferMem.m_UsageType == EMemoryBlockUsage::STAGING)
 				m_pStagingMemoryUsage->store(m_pStagingMemoryUsage->load(std::memory_order_relaxed) - BufferMem.m_Size, std::memory_order_relaxed);
 
 			if(IsVerbose())
@@ -2254,7 +2330,8 @@ protected:
 			}
 		}
 
-		const bool FrameBlendEnabled = IsFrameBlendEnabled();
+		// bestclient
+		const bool FrameBlendEnabled = BcMotionBlurEnabled();
 		if(FrameBlendEnabled != m_FrameBlendEnabledLastFrame)
 		{
 			ResetFrameBlendHistory();
@@ -2262,11 +2339,14 @@ protected:
 		}
 		if(FrameBlendEnabled && !RenderFrameBlend(CommandBuffer))
 			return false;
+		// bestclient
 
 		vkCmdEndRenderPass(CommandBuffer);
 
+		// bestclient
 		if(FrameBlendEnabled)
 			CopyFrameToFrameBlendHistory(CommandBuffer);
+		// bestclient
 
 		if(vkEndCommandBuffer(CommandBuffer) != VK_SUCCESS)
 		{
@@ -2424,17 +2504,14 @@ protected:
 			return false;
 		}
 
-		// Frame blend reads the previous presented frame's history image as a texture during the
-		// render pass. That image was written by vkCmdCopyImage in a previous submission on this same
-		// queue. A plain barrier here (GPU-side) makes that copy visible to this frame's blend sampling
-		// without stalling the CPU like vkWaitForFences would. When LastPresented == CurImageIndex the
-		// fence wait above already covers it.
-		if(IsFrameBlendEnabled() && m_LastPresentedSwapChainImageIndex != std::numeric_limits<decltype(m_LastPresentedSwapChainImageIndex)>::max() && m_LastPresentedSwapChainImageIndex != m_CurImageIndex)
+		// bestclient
+		if(BcMotionBlurEnabled() && m_LastPresentedSwapChainImageIndex != std::numeric_limits<decltype(m_LastPresentedSwapChainImageIndex)>::max() && m_LastPresentedSwapChainImageIndex != m_CurImageIndex)
 		{
 			auto &HistoryImage = m_vFrameBlendImages[m_LastPresentedSwapChainImageIndex];
 			if(HistoryImage.m_Valid)
 				FrameBlendImageBarrier(CommandBuffer, HistoryImage.m_Image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 		}
+		// bestclient
 
 		VkRenderPassBeginInfo RenderPassInfo{};
 		RenderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -2535,6 +2612,8 @@ protected:
 
 		if(Tex.m_RescaleCount > 0)
 		{
+			const size_t OldWidth = Width;
+			const size_t OldHeight = Height;
 			for(uint32_t i = 0; i < Tex.m_RescaleCount; ++i)
 			{
 				Width >>= 1;
@@ -2544,7 +2623,7 @@ protected:
 				YOff /= 2;
 			}
 
-			uint8_t *pTmpData = ResizeImage(pData, Width, Height, Width, Height, VulkanFormatToPixelSize(Format));
+			uint8_t *pTmpData = ResizeImage(pData, OldWidth, OldHeight, Width, Height, VulkanFormatToPixelSize(Format));
 			free(pData);
 			pData = pTmpData;
 		}
@@ -2591,6 +2670,8 @@ protected:
 		uint32_t RescaleCount = 0;
 		if((size_t)Width > m_MaxTextureSize || (size_t)Height > m_MaxTextureSize)
 		{
+			const size_t OldWidth = Width;
+			const size_t OldHeight = Height;
 			do
 			{
 				Width >>= 1;
@@ -2598,7 +2679,7 @@ protected:
 				++RescaleCount;
 			} while((size_t)Width > m_MaxTextureSize || (size_t)Height > m_MaxTextureSize);
 
-			uint8_t *pTmpData = ResizeImage(pData, Width, Height, Width, Height, PixelSize);
+			uint8_t *pTmpData = ResizeImage(pData, OldWidth, OldHeight, Width, Height, PixelSize);
 			free(pData);
 			pData = pTmpData;
 		}
@@ -2642,16 +2723,13 @@ protected:
 
 		if(Requires2DTextureArray)
 		{
-			int Image3DWidth = Width;
-			int Image3DHeight = Height;
-
 			int ConvertWidth = Width;
 			int ConvertHeight = Height;
 
 			if(ConvertWidth == 0 || (ConvertWidth % 16) != 0 || ConvertHeight == 0 || (ConvertHeight % 16) != 0)
 			{
-				int NewWidth = maximum<int>(HighestBit(ConvertWidth), 16);
-				int NewHeight = maximum<int>(HighestBit(ConvertHeight), 16);
+				int NewWidth = std::max(HighestBit(ConvertWidth), 16);
+				int NewHeight = std::max(HighestBit(ConvertHeight), 16);
 				uint8_t *pNewTexData = ResizeImage(pData, ConvertWidth, ConvertHeight, NewWidth, NewHeight, PixelSize);
 				if(IsVerbose())
 				{
@@ -2665,40 +2743,31 @@ protected:
 				pData = pNewTexData;
 			}
 
-			bool Needs3DTexDel = false;
+			int Image3DWidth, Image3DHeight;
 			uint8_t *pTexData3D = static_cast<uint8_t *>(malloc((size_t)PixelSize * ConvertWidth * ConvertHeight));
-			if(!Texture2DTo3D(pData, ConvertWidth, ConvertHeight, PixelSize, 16, 16, pTexData3D, Image3DWidth, Image3DHeight))
+			Texture2DTo3D(pData, ConvertWidth, ConvertHeight, PixelSize, 16, 16, pTexData3D, Image3DWidth, Image3DHeight);
+
+			const size_t ImageDepth2DArray = (size_t)16 * 16;
+			VkExtent3D ImgSize{(uint32_t)Image3DWidth, (uint32_t)Image3DHeight, 1};
+			if(RequiresMipMaps)
 			{
-				free(pTexData3D);
-				pTexData3D = nullptr;
+				MipMapLevelCount = ImageMipLevelCount(ImgSize);
+				if(!m_OptimalRGBAImageBlitting)
+					MipMapLevelCount = 1;
 			}
-			Needs3DTexDel = true;
 
-			if(pTexData3D != nullptr)
-			{
-				const size_t ImageDepth2DArray = (size_t)16 * 16;
-				VkExtent3D ImgSize{(uint32_t)Image3DWidth, (uint32_t)Image3DHeight, 1};
-				if(RequiresMipMaps)
-				{
-					MipMapLevelCount = ImageMipLevelCount(ImgSize);
-					if(!m_OptimalRGBAImageBlitting)
-						MipMapLevelCount = 1;
-				}
+			if(!CreateTextureImage(ImageIndex, Texture.m_Img3D, Texture.m_Img3DMem, pTexData3D, Format, Image3DWidth, Image3DHeight, ImageDepth2DArray, PixelSize, MipMapLevelCount))
+				return false;
+			VkFormat ImgFormat = Format;
+			VkImageView ImgView = CreateTextureImageView(Texture.m_Img3D, ImgFormat, VK_IMAGE_VIEW_TYPE_2D_ARRAY, ImageDepth2DArray, MipMapLevelCount);
+			Texture.m_Img3DView = ImgView;
+			VkSampler ImgSampler = GetTextureSampler(SUPPORTED_SAMPLER_TYPE_2D_TEXTURE_ARRAY);
+			Texture.m_Sampler3D = ImgSampler;
 
-				if(!CreateTextureImage(ImageIndex, Texture.m_Img3D, Texture.m_Img3DMem, pTexData3D, Format, Image3DWidth, Image3DHeight, ImageDepth2DArray, PixelSize, MipMapLevelCount))
-					return false;
-				VkFormat ImgFormat = Format;
-				VkImageView ImgView = CreateTextureImageView(Texture.m_Img3D, ImgFormat, VK_IMAGE_VIEW_TYPE_2D_ARRAY, ImageDepth2DArray, MipMapLevelCount);
-				Texture.m_Img3DView = ImgView;
-				VkSampler ImgSampler = GetTextureSampler(SUPPORTED_SAMPLER_TYPE_2D_TEXTURE_ARRAY);
-				Texture.m_Sampler3D = ImgSampler;
+			if(!CreateNew3DTexturedStandardDescriptorSets(ImageIndex))
+				return false;
 
-				if(!CreateNew3DTexturedStandardDescriptorSets(ImageIndex))
-					return false;
-
-				if(Needs3DTexDel)
-					free(pTexData3D);
-			}
+			free(pTexData3D);
 		}
 		return true;
 	}
@@ -3556,6 +3625,11 @@ public:
 	{
 		std::set<std::string> OurExt;
 		OurExt.emplace(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+#ifdef VK_EXT_device_fault
+		// Only used when actually supported by the device (see device creation);
+		// enables detailed diagnostics after a VK_ERROR_DEVICE_LOST.
+		OurExt.emplace(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+#endif
 		return OurExt;
 	}
 
@@ -3572,7 +3646,7 @@ public:
 	[[nodiscard]] bool GetVulkanLayers(std::vector<std::string> &vVKLayers)
 	{
 		uint32_t LayerCount = 0;
-		VkResult Res = vkEnumerateInstanceLayerProperties(&LayerCount, NULL);
+		VkResult Res = vkEnumerateInstanceLayerProperties(&LayerCount, nullptr);
 		if(Res != VK_SUCCESS)
 		{
 			SetError(EGfxErrorType::GFX_ERROR_TYPE_INIT, "Could not get Vulkan layers.");
@@ -3638,7 +3712,7 @@ public:
 
 		VkApplicationInfo VKAppInfo = {};
 		VKAppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-		VKAppInfo.pNext = NULL;
+		VKAppInfo.pNext = nullptr;
 		VKAppInfo.pApplicationName = "DDNet";
 		VKAppInfo.applicationVersion = 1;
 		VKAppInfo.pEngineName = "DDNet-Vulkan";
@@ -3671,7 +3745,7 @@ public:
 
 		bool TryAgain = false;
 
-		VkResult Res = vkCreateInstance(&VKInstanceInfo, NULL, &m_VKInstance);
+		VkResult Res = vkCreateInstance(&VKInstanceInfo, nullptr, &m_VKInstance);
 		const char *pCritErrorMsg = CheckVulkanCriticalError(Res);
 		if(pCritErrorMsg != nullptr)
 		{
@@ -3679,7 +3753,9 @@ public:
 			return false;
 		}
 		else if(Res == VK_ERROR_LAYER_NOT_PRESENT || Res == VK_ERROR_EXTENSION_NOT_PRESENT)
+		{
 			TryAgain = true;
+		}
 
 		if(TryAgain && TryDebugExtensions)
 			return CreateVulkanInstance(vVKLayers, vVKExtensions, false);
@@ -3937,14 +4013,14 @@ public:
 			vLayerCNames.emplace_back(Layer.c_str());
 
 		uint32_t DevPropCount = 0;
-		if(vkEnumerateDeviceExtensionProperties(m_VKGPU, NULL, &DevPropCount, NULL) != VK_SUCCESS)
+		if(vkEnumerateDeviceExtensionProperties(m_VKGPU, nullptr, &DevPropCount, nullptr) != VK_SUCCESS)
 		{
 			SetError(EGfxErrorType::GFX_ERROR_TYPE_INIT, "Querying logical device extension properties failed.");
 			return false;
 		}
 
 		std::vector<VkExtensionProperties> vDevPropList(DevPropCount);
-		if(vkEnumerateDeviceExtensionProperties(m_VKGPU, NULL, &DevPropCount, vDevPropList.data()) != VK_SUCCESS)
+		if(vkEnumerateDeviceExtensionProperties(m_VKGPU, nullptr, &DevPropCount, vDevPropList.data()) != VK_SUCCESS)
 		{
 			SetError(EGfxErrorType::GFX_ERROR_TYPE_INIT, "Querying logical device extension properties failed.");
 			return false;
@@ -3961,13 +4037,40 @@ public:
 			}
 		}
 
+#ifdef VK_EXT_device_fault
+		bool DeviceFaultRequested = false;
+		for(const char *pDevExt : vDevPropCNames)
+		{
+			if(str_comp(pDevExt, VK_EXT_DEVICE_FAULT_EXTENSION_NAME) == 0)
+			{
+				DeviceFaultRequested = true;
+				break;
+			}
+		}
+
+		VkPhysicalDeviceFaultFeaturesEXT FaultFeatures = {};
+		FaultFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
+		if(DeviceFaultRequested)
+		{
+			auto pfnGetPhysicalDeviceFeatures2 = (PFN_vkGetPhysicalDeviceFeatures2)vkGetInstanceProcAddr(m_VKInstance, "vkGetPhysicalDeviceFeatures2");
+			if(pfnGetPhysicalDeviceFeatures2 != nullptr)
+			{
+				// The extension's core deviceFault feature must be enabled explicitly.
+				VkPhysicalDeviceFeatures2 PhysFeatures2 = {};
+				PhysFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+				PhysFeatures2.pNext = &FaultFeatures;
+				pfnGetPhysicalDeviceFeatures2(m_VKGPU, &PhysFeatures2);
+			}
+		}
+#endif
+
 		VkDeviceQueueCreateInfo VKQueueCreateInfo;
 		VKQueueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 		VKQueueCreateInfo.queueFamilyIndex = m_VKGraphicsQueueIndex;
 		VKQueueCreateInfo.queueCount = 1;
 		float QueuePrio = 1.0f;
 		VKQueueCreateInfo.pQueuePriorities = &QueuePrio;
-		VKQueueCreateInfo.pNext = NULL;
+		VKQueueCreateInfo.pNext = nullptr;
 		VKQueueCreateInfo.flags = 0;
 
 		VkDeviceCreateInfo VKCreateInfo;
@@ -3978,15 +4081,35 @@ public:
 		VKCreateInfo.enabledLayerCount = static_cast<uint32_t>(vLayerCNames.size());
 		VKCreateInfo.ppEnabledExtensionNames = vDevPropCNames.data();
 		VKCreateInfo.enabledExtensionCount = static_cast<uint32_t>(vDevPropCNames.size());
-		VKCreateInfo.pNext = NULL;
-		VKCreateInfo.pEnabledFeatures = NULL;
+		VKCreateInfo.pNext = nullptr;
+		VKCreateInfo.pEnabledFeatures = nullptr;
 		VKCreateInfo.flags = 0;
+
+#ifdef VK_EXT_device_fault
+		if(DeviceFaultRequested && FaultFeatures.deviceFault)
+		{
+			FaultFeatures.pNext = nullptr;
+			// We never read the vendor binary crash dump, so do not opt into generating it.
+			FaultFeatures.deviceFaultVendorBinary = VK_FALSE;
+			VKCreateInfo.pNext = &FaultFeatures;
+		}
+#endif
 
 		if(vkCreateDevice(m_VKGPU, &VKCreateInfo, nullptr, &m_VKDevice) != VK_SUCCESS)
 		{
 			SetError(EGfxErrorType::GFX_ERROR_TYPE_INIT, "Logical device could not be created.");
 			return false;
 		}
+
+#ifdef VK_EXT_device_fault
+		if(DeviceFaultRequested && FaultFeatures.deviceFault)
+		{
+			m_pfnGetDeviceFaultInfoEXT = (PFN_vkGetDeviceFaultInfoEXT)vkGetDeviceProcAddr(m_VKDevice, "vkGetDeviceFaultInfoEXT");
+			m_DeviceFaultAvailable = m_pfnGetDeviceFaultInfoEXT != nullptr;
+			if(m_DeviceFaultAvailable)
+				log_debug("gfx/vulkan", "VK_EXT_device_fault enabled; detailed fault info will be logged on device loss.");
+		}
+#endif
 
 		return true;
 	}
@@ -4019,7 +4142,7 @@ public:
 	[[nodiscard]] bool GetPresentationMode(VkPresentModeKHR &VKIOMode)
 	{
 		uint32_t PresentModeCount = 0;
-		if(vkGetPhysicalDeviceSurfacePresentModesKHR(m_VKGPU, m_VKPresentSurface, &PresentModeCount, NULL) != VK_SUCCESS)
+		if(vkGetPhysicalDeviceSurfacePresentModesKHR(m_VKGPU, m_VKPresentSurface, &PresentModeCount, nullptr) != VK_SUCCESS)
 		{
 			SetError(EGfxErrorType::GFX_ERROR_TYPE_INIT, "The device surface presentation modes could not be fetched.");
 			return false;
@@ -4242,7 +4365,9 @@ public:
 			return false;
 		}
 		else if(SwapchainCreateRes == VK_ERROR_NATIVE_WINDOW_IN_USE_KHR)
+		{
 			return false;
+		}
 
 		return true;
 	}
@@ -4412,88 +4537,6 @@ public:
 		return true;
 	}
 
-	void ResetFrameBlendHistory()
-	{
-		for(auto &FrameBlendImage : m_vFrameBlendImages)
-			FrameBlendImage.m_Valid = false;
-	}
-
-	[[nodiscard]] bool CreateFrameBlendDescriptorSet(SFrameBlendImage &FrameBlendImage)
-	{
-		VkDescriptorPool DescriptorPool;
-		if(!GetDescriptorPoolForAlloc(DescriptorPool, m_StandardTextureDescrPool, &FrameBlendImage.m_DescriptorSet, 1))
-			return false;
-
-		VkDescriptorSetAllocateInfo DesAllocInfo{};
-		DesAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		DesAllocInfo.descriptorPool = DescriptorPool;
-		DesAllocInfo.descriptorSetCount = 1;
-		DesAllocInfo.pSetLayouts = &m_StandardTexturedDescriptorSetLayout;
-
-		if(vkAllocateDescriptorSets(m_VKDevice, &DesAllocInfo, &FrameBlendImage.m_DescriptorSet.m_Descriptor) != VK_SUCCESS)
-		{
-			SetError(EGfxErrorType::GFX_ERROR_TYPE_INIT, "Creating the frame blend descriptor set failed.");
-			return false;
-		}
-
-		VkDescriptorImageInfo ImageInfo{};
-		ImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		ImageInfo.imageView = FrameBlendImage.m_ImgView;
-		ImageInfo.sampler = GetTextureSampler(SUPPORTED_SAMPLER_TYPE_CLAMP_TO_EDGE);
-
-		std::array<VkWriteDescriptorSet, 1> aDescriptorWrites{};
-		aDescriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		aDescriptorWrites[0].dstSet = FrameBlendImage.m_DescriptorSet.m_Descriptor;
-		aDescriptorWrites[0].dstBinding = 0;
-		aDescriptorWrites[0].dstArrayElement = 0;
-		aDescriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		aDescriptorWrites[0].descriptorCount = 1;
-		aDescriptorWrites[0].pImageInfo = &ImageInfo;
-
-		vkUpdateDescriptorSets(m_VKDevice, static_cast<uint32_t>(aDescriptorWrites.size()), aDescriptorWrites.data(), 0, nullptr);
-		return true;
-	}
-
-	[[nodiscard]] bool CreateFrameBlendImages()
-	{
-		m_vFrameBlendImages.resize(m_SwapChainImageCount);
-
-		for(auto &FrameBlendImage : m_vFrameBlendImages)
-		{
-			if(!CreateImage(m_VKSwapImgAndViewportExtent.m_SwapImageViewport.width, m_VKSwapImgAndViewportExtent.m_SwapImageViewport.height, 1, 1, m_VKSurfFormat.format, VK_IMAGE_TILING_OPTIMAL, FrameBlendImage.m_Image, FrameBlendImage.m_ImgMem, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT))
-				return false;
-			FrameBlendImage.m_ImgView = CreateImageView(FrameBlendImage.m_Image, m_VKSurfFormat.format, VK_IMAGE_VIEW_TYPE_2D, 1, 1);
-			if(!ImageBarrier(FrameBlendImage.m_Image, 0, 1, 0, 1, m_VKSurfFormat.format, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
-				return false;
-			if(!ImageBarrier(FrameBlendImage.m_Image, 0, 1, 0, 1, m_VKSurfFormat.format, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL))
-				return false;
-			if(!CreateFrameBlendDescriptorSet(FrameBlendImage))
-				return false;
-		}
-
-		ResetFrameBlendHistory();
-		m_FrameBlendEnabledLastFrame = false;
-		return true;
-	}
-
-	void DestroyFrameBlendImages()
-	{
-		for(auto &FrameBlendImage : m_vFrameBlendImages)
-		{
-			if(FrameBlendImage.m_DescriptorSet.m_Descriptor != VK_NULL_HANDLE)
-				FreeDescriptorSetFromPool(FrameBlendImage.m_DescriptorSet);
-			if(FrameBlendImage.m_ImgView != VK_NULL_HANDLE)
-				vkDestroyImageView(m_VKDevice, FrameBlendImage.m_ImgView, nullptr);
-			if(FrameBlendImage.m_Image != VK_NULL_HANDLE)
-				vkDestroyImage(m_VKDevice, FrameBlendImage.m_Image, nullptr);
-			if(FrameBlendImage.m_ImgMem.m_BufferMem.m_Mem != VK_NULL_HANDLE)
-				FreeImageMemBlock(FrameBlendImage.m_ImgMem);
-		}
-
-		m_vFrameBlendImages.clear();
-		m_FrameBlendEnabledLastFrame = false;
-	}
-
 	void DestroyMultiSamplerImageAttachments()
 	{
 		if(HasMultiSampling())
@@ -4508,6 +4551,10 @@ public:
 		}
 		m_vSwapChainMultiSamplingImages.clear();
 	}
+
+	// bestclient
+#include <game/client/components/bestclient/motion_blur_vulkan.inl>
+	// bestclient
 
 	[[nodiscard]] bool CreateRenderPass(bool ClearAttachments)
 	{
@@ -5432,6 +5479,7 @@ public:
 				}
 			}
 
+			// bestclient
 			m_vFrameBlendCommandBuffers.resize(m_SwapChainImageCount);
 			AllocInfo.commandPool = m_vCommandPools[0];
 			AllocInfo.commandBufferCount = (uint32_t)m_vFrameBlendCommandBuffers.size();
@@ -5441,6 +5489,7 @@ public:
 				SetError(EGfxErrorType::GFX_ERROR_TYPE_INIT, "Allocating frame blend command buffers failed.");
 				return false;
 			}
+			// bestclient
 		}
 
 		return true;
@@ -5457,7 +5506,9 @@ public:
 				++Count;
 			}
 
+			// bestclient
 			vkFreeCommandBuffers(m_VKDevice, m_vCommandPools[0], static_cast<uint32_t>(m_vFrameBlendCommandBuffers.size()), m_vFrameBlendCommandBuffers.data());
+			// bestclient
 		}
 
 		vkFreeCommandBuffers(m_VKDevice, m_vCommandPools[0], static_cast<uint32_t>(m_vMemoryCommandBuffers.size()), m_vMemoryCommandBuffers.data());
@@ -5466,7 +5517,9 @@ public:
 		m_vvThreadDrawCommandBuffers.clear();
 		m_vvUsedThreadDrawCommandBuffer.clear();
 		m_vHelperThreadDrawCommandBuffers.clear();
+		// bestclient
 		m_vFrameBlendCommandBuffers.clear();
+		// bestclient
 
 		m_vMainDrawCommandBuffers.clear();
 		m_vMemoryCommandBuffers.clear();
@@ -5563,7 +5616,9 @@ public:
 
 		DestroyRenderPass();
 
+		// bestclient
 		DestroyFrameBlendImages();
+		// bestclient
 
 		DestroyMultiSamplerImageAttachments();
 
@@ -5703,11 +5758,13 @@ public:
 		if(!m_SwapchainCreated)
 			Ret = InitVulkanSwapChain(OldSwapChain);
 
+		// bestclient
 		if(Ret == 0 && OldSwapChainImageCount == m_SwapChainImageCount)
 		{
 			if(!CreateFrameBlendImages())
 				Ret = -1;
 		}
+		// bestclient
 
 		if(OldSwapChainImageCount != m_SwapChainImageCount)
 		{
@@ -5813,11 +5870,11 @@ public:
 
 		VKBufferMemory.m_Size = MemRequirements.size;
 
-		if(MemUsage == MEMORY_BLOCK_USAGE_BUFFER)
+		if(MemUsage == EMemoryBlockUsage::BUFFER)
 			m_pBufferMemoryUsage->store(m_pBufferMemoryUsage->load(std::memory_order_relaxed) + MemRequirements.size, std::memory_order_relaxed);
-		else if(MemUsage == MEMORY_BLOCK_USAGE_STAGING)
+		else if(MemUsage == EMemoryBlockUsage::STAGING)
 			m_pStagingMemoryUsage->store(m_pStagingMemoryUsage->load(std::memory_order_relaxed) + MemRequirements.size, std::memory_order_relaxed);
-		else if(MemUsage == MEMORY_BLOCK_USAGE_STREAM)
+		else if(MemUsage == EMemoryBlockUsage::STREAM)
 			m_pStreamMemoryUsage->store(m_pStreamMemoryUsage->load(std::memory_order_relaxed) + MemRequirements.size, std::memory_order_relaxed);
 
 		if(IsVerbose())
@@ -5886,15 +5943,14 @@ public:
 			UniformBufferDescrPool.m_DefaultAllocSize = 512;
 		}
 
-		bool Ret = AllocateDescriptorPool(m_StandardTextureDescrPool, CCommandBuffer::MAX_TEXTURES);
-		Ret |= AllocateDescriptorPool(m_TextTextureDescrPool, 8);
-
+		bool Success = true;
+		Success &= AllocateDescriptorPool(m_StandardTextureDescrPool, CCommandBuffer::MAX_TEXTURES);
+		Success &= AllocateDescriptorPool(m_TextTextureDescrPool, 8);
 		for(auto &UniformBufferDescrPool : m_vUniformBufferDescrPools)
 		{
-			Ret |= AllocateDescriptorPool(UniformBufferDescrPool, 64);
+			Success &= AllocateDescriptorPool(UniformBufferDescrPool, 64);
 		}
-
-		return Ret;
+		return Success;
 	}
 
 	void DestroyDescriptorPools()
@@ -5960,7 +6016,7 @@ public:
 				if(!AllocateDescriptorPool(DescriptorPools, DescriptorPools.m_DefaultAllocSize))
 					return false;
 
-				AllocatedInThisRun = minimum((size_t)DescriptorPools.m_DefaultAllocSize, CurAllocNum);
+				AllocatedInThisRun = std::min((size_t)DescriptorPools.m_DefaultAllocSize, CurAllocNum);
 
 				auto &Pool = DescriptorPools.m_vPools.back();
 				Pool.m_CurSize += AllocatedInThisRun;
@@ -5987,85 +6043,6 @@ public:
 			vkFreeDescriptorSets(m_VKDevice, DescrSet.m_pPools->m_vPools[DescrSet.m_PoolIndex].m_Pool, 1, &DescrSet.m_Descriptor);
 			DescrSet.m_pPools->m_vPools[DescrSet.m_PoolIndex].m_CurSize -= 1;
 		}
-	}
-
-	[[nodiscard]] bool FlushManualVertexBufferRange(const SDeviceMemoryBlock &BufferMem, size_t Offset, size_t DataSize)
-	{
-		VkMappedMemoryRange MemRange{};
-		MemRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-		MemRange.memory = BufferMem.m_Mem;
-		MemRange.offset = Offset;
-		auto AlignmentMod = ((VkDeviceSize)DataSize % m_NonCoherentMemAlignment);
-		auto AlignmentReq = (m_NonCoherentMemAlignment - AlignmentMod);
-		if(AlignmentMod == 0)
-			AlignmentReq = 0;
-		MemRange.size = DataSize + AlignmentReq;
-		if(MemRange.offset + MemRange.size > BufferMem.m_Size)
-			MemRange.size = VK_WHOLE_SIZE;
-		return vkFlushMappedMemoryRanges(m_VKDevice, 1, &MemRange) == VK_SUCCESS;
-	}
-
-	void FrameBlendImageBarrier(VkCommandBuffer &CommandBuffer, VkImage Image, VkImageLayout OldLayout, VkImageLayout NewLayout)
-	{
-		VkImageMemoryBarrier Barrier{};
-		Barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		Barrier.oldLayout = OldLayout;
-		Barrier.newLayout = NewLayout;
-		Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		Barrier.image = Image;
-		Barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		Barrier.subresourceRange.baseMipLevel = 0;
-		Barrier.subresourceRange.levelCount = 1;
-		Barrier.subresourceRange.baseArrayLayer = 0;
-		Barrier.subresourceRange.layerCount = 1;
-
-		VkPipelineStageFlags SourceStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-		VkPipelineStageFlags DestinationStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-
-		if(OldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL && NewLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
-		{
-			Barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			Barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			SourceStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-			DestinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-		}
-		else if(OldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && NewLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-		{
-			Barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			Barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			SourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-			DestinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-		}
-		else if(OldLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR && NewLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
-		{
-			Barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
-			Barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-			SourceStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-			DestinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-		}
-		else if(OldLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL && NewLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
-		{
-			Barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-			Barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
-			SourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-			DestinationStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-		}
-		else if(OldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL && NewLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-		{
-			// no layout change: only make the previous frame's copy into the history image
-			// (recorded in a previous submission on the same queue) visible to this frame's blend sampling
-			Barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			Barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-			SourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-			DestinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-		}
-		else
-		{
-			dbg_assert_failed("Unsupported frame blend layout transition. OldLayout=%d NewLayout=%d", (int)OldLayout, (int)NewLayout);
-		}
-
-		vkCmdPipelineBarrier(CommandBuffer, SourceStage, DestinationStage, 0, 0, nullptr, 0, nullptr, 1, &Barrier);
 	}
 
 	[[nodiscard]] bool CreateNewTexturedStandardDescriptorSets(size_t TextureSlot, size_t DescrIndex)
@@ -6381,8 +6358,10 @@ public:
 				return -1;
 		}
 
+		// bestclient
 		if(!CreateFrameBlendImages())
 			return -1;
+		// bestclient
 
 		m_vStreamedVertexBuffers.resize(m_ThreadCount);
 		m_vStreamedUniformBuffers.resize(m_ThreadCount);
@@ -6544,7 +6523,7 @@ public:
 			SDeviceMemoryBlock StreamBufferMemory;
 			const VkDeviceSize NewBufferSingleSize = sizeof(TInstanceTypeName) * InstanceTypeCount;
 			const VkDeviceSize NewBufferSize = NewBufferSingleSize * BufferCreateCount;
-			if(!CreateBuffer(NewBufferSize, MEMORY_BLOCK_USAGE_STREAM, Usage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, StreamBuffer, StreamBufferMemory))
+			if(!CreateBuffer(NewBufferSize, EMemoryBlockUsage::STREAM, Usage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, StreamBuffer, StreamBufferMemory))
 				return false;
 
 			void *pMappedData = nullptr;
@@ -6635,7 +6614,7 @@ public:
 
 		SDeviceMemoryBlock VertexBufferMemory;
 		VkBuffer VertexBuffer;
-		if(!CreateBuffer(BufferDataSize, MEMORY_BLOCK_USAGE_BUFFER, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VertexBuffer, VertexBufferMemory))
+		if(!CreateBuffer(BufferDataSize, EMemoryBlockUsage::BUFFER, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VertexBuffer, VertexBufferMemory))
 			return false;
 
 		if(!MemoryBarrier(VertexBuffer, 0, BufferDataSize, VK_ACCESS_INDEX_READ_BIT, true))
@@ -6947,6 +6926,19 @@ public:
 		return true;
 	}
 
+	[[nodiscard]] bool Cmd_Texture_Update(const CCommandBuffer::SCommand_Texture_Update *pCommand)
+	{
+		size_t IndexTex = pCommand->m_Slot;
+		uint8_t *pData = pCommand->m_pData;
+
+		if(!UpdateTexture(IndexTex, VK_FORMAT_R8G8B8A8_UNORM, pData, pCommand->m_X, pCommand->m_Y, pCommand->m_Width, pCommand->m_Height))
+			return false;
+
+		free(pData);
+
+		return true;
+	}
+
 	void Cmd_Clear_FillExecuteBuffer(SRenderCommandExecuteBuffer &ExecBuffer, const CCommandBuffer::SCommand_Clear *pCommand)
 	{
 		if(!pCommand->m_ForceClear)
@@ -7005,166 +6997,6 @@ public:
 		return RenderStandard<CCommandBuffer::SVertex, false>(ExecBuffer, pCommand->m_State, pCommand->m_PrimType, pCommand->m_pVertices, pCommand->m_PrimCount);
 	}
 
-	[[nodiscard]] bool RenderFrameBlend(VkCommandBuffer &MainCommandBuffer)
-	{
-		if(m_vFrameBlendImages.empty() || m_LastPresentedSwapChainImageIndex == std::numeric_limits<decltype(m_LastPresentedSwapChainImageIndex)>::max())
-			return true;
-
-		auto &FrameBlendImage = m_vFrameBlendImages[m_LastPresentedSwapChainImageIndex];
-		if(!FrameBlendImage.m_Valid)
-			return true;
-
-		// Map 0-95 user range to 0-4.0 internal strength (matching old 400% max behavior)
-		const float TotalBlendStrength = (g_Config.m_BcMotionBlurStrength / 95.0f) * 4.0f;
-		if(TotalBlendStrength <= 0.0f)
-			return true;
-		constexpr float MaxBlendAlphaPerPass = 0.85f;
-		const int BlendPassCount = std::max(1, (int)std::ceil(TotalBlendStrength / MaxBlendAlphaPerPass));
-		const float BlendAlphaPerPass = TotalBlendStrength / (float)BlendPassCount;
-
-		// With multiple render threads the render pass was begun with
-		// VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS — inline draws into the primary
-		// command buffer are invalid there, so record the blend quad into a dedicated
-		// secondary command buffer and execute it.
-		const bool UseSecondaryCommandBuffer = m_ThreadCount > 1;
-		VkCommandBuffer CommandBuffer = MainCommandBuffer;
-		if(UseSecondaryCommandBuffer)
-		{
-			CommandBuffer = m_vFrameBlendCommandBuffers[m_CurImageIndex];
-			vkResetCommandBuffer(CommandBuffer, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
-
-			VkCommandBufferInheritanceInfo InheritanceInfo{};
-			InheritanceInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
-			InheritanceInfo.framebuffer = m_vFramebufferList[m_CurImageIndex];
-			InheritanceInfo.occlusionQueryEnable = VK_FALSE;
-			InheritanceInfo.renderPass = m_VKRenderPass;
-			InheritanceInfo.subpass = 0;
-
-			VkCommandBufferBeginInfo BeginInfo{};
-			BeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-			BeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT | VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
-			BeginInfo.pInheritanceInfo = &InheritanceInfo;
-
-			if(vkBeginCommandBuffer(CommandBuffer, &BeginInfo) != VK_SUCCESS)
-			{
-				SetError(EGfxErrorType::GFX_ERROR_TYPE_RENDER_RECORDING, "Frame blend command buffer cannot be filled anymore.");
-				return false;
-			}
-		}
-
-		CCommandBuffer::SState State{};
-		State.m_BlendMode = EBlendMode::ALPHA;
-		State.m_WrapMode = EWrapMode::CLAMP;
-		State.m_Texture = 0;
-		State.m_ScreenTL = vec2(0.0f, 0.0f);
-		auto Viewport = m_VKSwapImgAndViewportExtent.GetPresentedImageViewport();
-		State.m_ScreenBR = vec2((float)Viewport.width, (float)Viewport.height);
-		State.m_ClipEnable = false;
-
-		SRenderCommandExecuteBuffer ExecBuffer{};
-		ExecBuffer.m_ThreadIndex = MAIN_THREAD_INDEX;
-		ExecBuffer.m_IndexBuffer = m_IndexBuffer;
-		ExecBufferFillDynamicStates(State, ExecBuffer);
-
-		bool IsTextured;
-		size_t BlendModeIndex;
-		size_t DynamicIndex;
-		size_t AddressModeIndex;
-		GetStateIndices(ExecBuffer, State, IsTextured, BlendModeIndex, DynamicIndex, AddressModeIndex);
-
-		auto &PipeLayout = GetStandardPipeLayout(false, true, BlendModeIndex, DynamicIndex);
-		auto &PipeLine = GetStandardPipe(false, true, BlendModeIndex, DynamicIndex);
-		// Bind everything explicitly — the m_vLastPipeline / dynamic state caches track other
-		// command buffers, and bind state never carries over between command buffers.
-		vkCmdBindPipeline(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PipeLine);
-		if(ExecBuffer.m_HasDynamicState)
-		{
-			vkCmdSetViewport(CommandBuffer, 0, 1, &ExecBuffer.m_Viewport);
-			vkCmdSetScissor(CommandBuffer, 0, 1, &ExecBuffer.m_Scissor);
-		}
-
-		std::array<CCommandBuffer::SVertex, 4> aVertices{};
-		aVertices[0].m_Pos = vec2(0.0f, 0.0f);
-		aVertices[1].m_Pos = vec2((float)Viewport.width, 0.0f);
-		aVertices[2].m_Pos = vec2((float)Viewport.width, (float)Viewport.height);
-		aVertices[3].m_Pos = vec2(0.0f, (float)Viewport.height);
-		aVertices[0].m_Tex = vec2(0.0f, 0.0f);
-		aVertices[1].m_Tex = vec2(1.0f, 0.0f);
-		aVertices[2].m_Tex = vec2(1.0f, 1.0f);
-		aVertices[3].m_Tex = vec2(0.0f, 1.0f);
-		for(auto &Vertex : aVertices)
-		{
-			Vertex.m_Color.r = 255;
-			Vertex.m_Color.g = 255;
-			Vertex.m_Color.b = 255;
-			Vertex.m_Color.a = (uint8_t)std::round(BlendAlphaPerPass * 255.0f);
-		}
-
-		VkBuffer VKBuffer;
-		SDeviceMemoryBlock VKBufferMem;
-		size_t BufferOff = 0;
-		if(!CreateStreamVertexBuffer(MAIN_THREAD_INDEX, VKBuffer, VKBufferMem, BufferOff, aVertices.data(), sizeof(CCommandBuffer::SVertex) * aVertices.size()))
-			return false;
-		if(!FlushManualVertexBufferRange(VKBufferMem, BufferOff, sizeof(CCommandBuffer::SVertex) * aVertices.size()))
-			return false;
-
-		std::array<VkBuffer, 1> aVertexBuffers = {VKBuffer};
-		std::array<VkDeviceSize, 1> aOffsets = {(VkDeviceSize)BufferOff};
-		vkCmdBindVertexBuffers(CommandBuffer, 0, 1, aVertexBuffers.data(), aOffsets.data());
-		vkCmdBindIndexBuffer(CommandBuffer, ExecBuffer.m_IndexBuffer, 0, VK_INDEX_TYPE_UINT32);
-
-		std::array<float, 4 * 2> aMatrix;
-		GetStateMatrix(State, aMatrix);
-		vkCmdPushConstants(CommandBuffer, PipeLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(SUniformGPos), aMatrix.data());
-		vkCmdBindDescriptorSets(CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, PipeLayout, 0, 1, &FrameBlendImage.m_DescriptorSet.m_Descriptor, 0, nullptr);
-		for(int Pass = 0; Pass < BlendPassCount; ++Pass)
-			vkCmdDrawIndexed(CommandBuffer, 6, 1, 0, 0, 0);
-
-		if(UseSecondaryCommandBuffer)
-		{
-			if(vkEndCommandBuffer(CommandBuffer) != VK_SUCCESS)
-			{
-				SetError(EGfxErrorType::GFX_ERROR_TYPE_RENDER_RECORDING, "Frame blend command buffer cannot be ended anymore.");
-				return false;
-			}
-			vkCmdExecuteCommands(MainCommandBuffer, 1, &CommandBuffer);
-		}
-
-		return true;
-	}
-
-	void CopyFrameToFrameBlendHistory(VkCommandBuffer &CommandBuffer)
-	{
-		if(m_vFrameBlendImages.empty())
-			return;
-
-		auto &FrameBlendImage = m_vFrameBlendImages[m_CurImageIndex];
-		auto &SwapImage = m_vSwapChainImages[m_CurImageIndex];
-
-		FrameBlendImageBarrier(CommandBuffer, FrameBlendImage.m_Image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-		FrameBlendImageBarrier(CommandBuffer, SwapImage, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-
-		VkImageCopy Region{};
-		Region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		Region.srcSubresource.mipLevel = 0;
-		Region.srcSubresource.baseArrayLayer = 0;
-		Region.srcSubresource.layerCount = 1;
-		Region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		Region.dstSubresource.mipLevel = 0;
-		Region.dstSubresource.baseArrayLayer = 0;
-		Region.dstSubresource.layerCount = 1;
-		Region.extent.width = m_VKSwapImgAndViewportExtent.m_SwapImageViewport.width;
-		Region.extent.height = m_VKSwapImgAndViewportExtent.m_SwapImageViewport.height;
-		Region.extent.depth = 1;
-
-		vkCmdCopyImage(CommandBuffer, SwapImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, FrameBlendImage.m_Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
-
-		FrameBlendImageBarrier(CommandBuffer, FrameBlendImage.m_Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-		FrameBlendImageBarrier(CommandBuffer, SwapImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-
-		FrameBlendImage.m_Valid = true;
-	}
-
 	[[nodiscard]] bool Cmd_ReadPixel(const CCommandBuffer::SCommand_TrySwapAndReadPixel *pCommand)
 	{
 		if(!*pCommand->m_pSwapped && !NextFrame())
@@ -7195,19 +7027,22 @@ public:
 		uint32_t Width;
 		uint32_t Height;
 		CImageInfo::EImageFormat Format;
+
 		if(GetPresentedImageDataImpl(Width, Height, Format, m_vScreenshotHelper, true, {}))
 		{
-			const size_t ImgSize = (size_t)Width * (size_t)Height * CImageInfo::PixelSize(Format);
-			pCommand->m_pImage->m_pData = static_cast<uint8_t *>(malloc(ImgSize));
-			mem_copy(pCommand->m_pImage->m_pData, m_vScreenshotHelper.data(), ImgSize);
+			pCommand->m_pImage->m_Width = (int)Width;
+			pCommand->m_pImage->m_Height = (int)Height;
+			pCommand->m_pImage->m_Format = Format;
+			pCommand->m_pImage->Allocate();
+			mem_copy(pCommand->m_pImage->m_pData, m_vScreenshotHelper.data(), pCommand->m_pImage->DataSize());
 		}
 		else
 		{
+			pCommand->m_pImage->m_Width = 0;
+			pCommand->m_pImage->m_Height = 0;
+			pCommand->m_pImage->m_Format = CImageInfo::FORMAT_UNDEFINED;
 			pCommand->m_pImage->m_pData = nullptr;
 		}
-		pCommand->m_pImage->m_Width = (int)Width;
-		pCommand->m_pImage->m_Height = (int)Height;
-		pCommand->m_pImage->m_Format = Format;
 
 		return true;
 	}
@@ -7258,11 +7093,9 @@ public:
 			{
 				m_HasDynamicViewport = true;
 
-				// convert viewport from OGL to vulkan
-				int32_t ViewportY = (int32_t)Viewport.height - ((int32_t)pCommand->m_Y + (int32_t)pCommand->m_Height);
-				uint32_t ViewportH = (int32_t)pCommand->m_Height;
-				m_DynamicViewportOffset = {(int32_t)pCommand->m_X, ViewportY};
-				m_DynamicViewportSize = {(uint32_t)pCommand->m_Width, ViewportH};
+				// The viewport rectangle and Vulkan both use a top left origin.
+				m_DynamicViewportOffset = {(int32_t)pCommand->m_X, (int32_t)pCommand->m_Y};
+				m_DynamicViewportSize = {(uint32_t)pCommand->m_Width, (uint32_t)pCommand->m_Height};
 			}
 			else
 			{
@@ -7920,10 +7753,12 @@ public:
 
 		m_ThreadCount = g_Config.m_GfxRenderThreadCount;
 		if(m_ThreadCount <= 1)
+		{
 			m_ThreadCount = 1;
+		}
 		else
 		{
-			m_ThreadCount = std::clamp<decltype(m_ThreadCount)>(m_ThreadCount, 3, std::max<decltype(m_ThreadCount)>(3, std::thread::hardware_concurrency()));
+			m_ThreadCount = std::clamp(m_ThreadCount, (size_t)3, std::max((size_t)3, (size_t)std::thread::hardware_concurrency()));
 		}
 
 		// start threads
@@ -7996,6 +7831,7 @@ public:
 
 	void RunThread(size_t ThreadIndex)
 	{
+		s_ThreadIsRenderWorker = true;
 		auto *pThread = m_vpRenderThreads[ThreadIndex].get();
 		std::unique_lock<std::mutex> Lock(pThread->m_Mutex);
 		pThread->m_Started = true;

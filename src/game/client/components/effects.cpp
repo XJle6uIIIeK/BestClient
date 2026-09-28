@@ -23,14 +23,16 @@ CEffects::CEffects()
 	m_Add100hz = false;
 }
 
-void CEffects::AirJump(vec2 Pos, float Alpha, float Volume)
+void CEffects::AirJump(vec2 Pos, float Alpha, float Volume, bool OtherPlayer)
 {
+	// bestclient
 	if(g_Config.m_ClFocusMode && g_Config.m_ClFocusModeHideEffects)
 	{
-		if(g_Config.m_SndGame)
-			GameClient()->m_Sounds.PlayAt(CSounds::CHN_WORLD, SOUND_PLAYER_AIRJUMP, 1.0f, Pos);
+		if(g_Config.m_SndGame && !BestClientShouldMuteOthersAirJumpSound(g_Config.m_BcMuteOthersAirJump, OtherPlayer))
+			GameClient()->m_Sounds.PlayAt(CSounds::CHN_WORLD, SOUND_PLAYER_AIRJUMP, Volume, Pos);
 		return;
 	}
+	// bestclient
 
 	CParticle p;
 	p.SetDefault();
@@ -44,6 +46,7 @@ void CEffects::AirJump(vec2 Pos, float Alpha, float Volume)
 	p.m_Rotspeed = pi * 2.0f;
 	p.m_Gravity = 500.0f;
 	p.m_Friction = 0.7f;
+	p.m_FlowAffected = 0.0f;
 	p.m_Color.a = Alpha;
 	p.m_StartAlpha = Alpha;
 	GameClient()->m_Particles.Add(CParticles::GROUP_GENERAL, &p);
@@ -51,8 +54,10 @@ void CEffects::AirJump(vec2 Pos, float Alpha, float Volume)
 	p.m_Pos = Pos + vec2(6.0f, 16.0f);
 	GameClient()->m_Particles.Add(CParticles::GROUP_GENERAL, &p);
 
-	if(g_Config.m_SndGame)
+	// bestclient
+	if(g_Config.m_SndGame && !BestClientShouldMuteOthersAirJumpSound(g_Config.m_BcMuteOthersAirJump, OtherPlayer))
 		GameClient()->m_Sounds.PlayAt(CSounds::CHN_WORLD, SOUND_PLAYER_AIRJUMP, Volume, Pos);
+	// bestclient
 }
 
 void CEffects::DamageIndicator(vec2 Pos, vec2 Dir, float Alpha)
@@ -77,6 +82,7 @@ void CEffects::PowerupShine(vec2 Pos, vec2 Size, float Alpha)
 	p.m_Rotspeed = pi * 2.0f;
 	p.m_Gravity = 500.0f;
 	p.m_Friction = 0.9f;
+	p.m_FlowAffected = 0.0f;
 	p.m_Color.a = Alpha;
 	p.m_StartAlpha = Alpha;
 	GameClient()->m_Particles.Add(CParticles::GROUP_GENERAL, &p);
@@ -84,8 +90,10 @@ void CEffects::PowerupShine(vec2 Pos, vec2 Size, float Alpha)
 
 void CEffects::FreezingFlakes(vec2 Pos, vec2 Size, float Alpha)
 {
+	// bestclient
 	if(g_Config.m_ClFocusMode && g_Config.m_ClFocusModeHideEffects)
 		return;
+	// bestclient
 
 	if(!m_Add5hz)
 		return;
@@ -105,6 +113,7 @@ void CEffects::FreezingFlakes(vec2 Pos, vec2 Size, float Alpha)
 	p.m_Rotspeed = pi;
 	p.m_Gravity = random_float(250.0f);
 	p.m_Friction = 0.9f;
+	p.m_FlowAffected = 0.0f;
 	p.m_Collides = false;
 	p.m_Color.a = Alpha;
 	p.m_StartAlpha = Alpha;
@@ -334,6 +343,9 @@ void CEffects::Confetti(vec2 Pos, float Alpha)
 
 void CEffects::Explosion(vec2 Pos, float Alpha)
 {
+	// bestclient
+	const bool CustomExplosion = GameClient()->m_WeaponVfx.TriggerExplosion(Pos, Alpha);
+	// bestclient
 	// add to flow
 	for(int y = -8; y <= 8; y++)
 		for(int x = -8; x <= 8; x++)
@@ -356,7 +368,10 @@ void CEffects::Explosion(vec2 Pos, float Alpha)
 	p.m_Rot = random_angle();
 	p.m_Color.a = Alpha;
 	p.m_StartAlpha = Alpha;
-	GameClient()->m_Particles.Add(CParticles::GROUP_EXPLOSIONS, &p);
+	// bestclient
+	if(!CustomExplosion)
+		GameClient()->m_Particles.Add(CParticles::GROUP_EXPLOSIONS, &p);
+	// bestclient
 
 	// Nudge position slightly to edge of closest tile so the
 	// smoke doesn't get stuck inside the tile.
@@ -381,7 +396,9 @@ void CEffects::Explosion(vec2 Pos, float Alpha)
 	}
 
 	// add the smoke
-	for(int i = 0; i < 24; i++)
+	// bestclient
+	for(int i = 0; !CustomExplosion && i < 24; i++)
+	// bestclient
 	{
 		p.SetDefault();
 		p.m_Spr = SPRITE_PART_SMOKE;
@@ -397,17 +414,21 @@ void CEffects::Explosion(vec2 Pos, float Alpha)
 		GameClient()->m_Particles.Add(CParticles::GROUP_GENERAL, &p);
 	}
 
+	// bestclient
 	GameClient()->m_PhysicBalls.OnExplosion(Pos, Alpha == 1.0f);
+	// bestclient
 }
 
 void CEffects::HammerHit(vec2 Pos, float Alpha, float Volume, bool OtherPlayer)
 {
+	// bestclient
 	if(g_Config.m_ClFocusMode && g_Config.m_ClFocusModeHideEffects)
 	{
-		if(g_Config.m_SndGame && !(OtherPlayer && g_Config.m_BcMuteOthersHammer))
-			GameClient()->m_Sounds.PlayAt(CSounds::CHN_WORLD, SOUND_HAMMER_HIT, 1.0f, Pos);
+		if(g_Config.m_SndGame && !BestClientShouldMuteOthersHammerHitSound(g_Config.m_BcMuteOthersHammer, OtherPlayer))
+			GameClient()->m_Sounds.PlayAt(CSounds::CHN_WORLD, SOUND_HAMMER_HIT, Volume, Pos);
 		return;
 	}
+	// bestclient
 
 	// add the explosion
 	CParticle p;
@@ -421,19 +442,18 @@ void CEffects::HammerHit(vec2 Pos, float Alpha, float Volume, bool OtherPlayer)
 	p.m_Color.a = Alpha;
 	p.m_StartAlpha = Alpha;
 	GameClient()->m_Particles.Add(CParticles::GROUP_EXPLOSIONS, &p);
-	if(g_Config.m_SndGame && !(OtherPlayer && g_Config.m_BcMuteOthersHammer))
+	// bestclient
+	if(g_Config.m_SndGame && !BestClientShouldMuteOthersHammerHitSound(g_Config.m_BcMuteOthersHammer, OtherPlayer))
 		GameClient()->m_Sounds.PlayAt(CSounds::CHN_WORLD, SOUND_HAMMER_HIT, Volume, Pos);
+	// bestclient
 }
 
 void CEffects::OnRender()
 {
-	float Speed = 1.0f;
-	if(Client()->State() == IClient::STATE_DEMOPLAYBACK)
-		Speed = DemoPlayer()->BaseInfo()->m_Speed;
-
+	const float Speed = GameClient()->GetAnimationPlaybackSpeed();
 	const int64_t Now = time();
 	auto UpdateClock = [&](bool &Add, int64_t &LastUpdate, int Frequency) {
-		Add = Now - LastUpdate > time_freq() / ((float)Frequency * Speed);
+		Add = (Now - LastUpdate) / (float)time_freq() * Speed > 1.0f / Frequency;
 		if(Add)
 			LastUpdate = Now;
 	};

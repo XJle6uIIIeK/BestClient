@@ -2,6 +2,8 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "maplayers.h"
 
+#include <engine/map.h>
+
 #include <game/client/gameclient.h>
 #include <game/localization.h>
 
@@ -15,11 +17,6 @@ CMapLayers::CMapLayers(ERenderType Type, bool OnlineOnly)
 	m_Params.m_RenderInvalidTiles = false;
 	m_Params.m_TileAndQuadBuffering = true;
 	m_Params.m_RenderTileBorder = true;
-	m_Params.m_FpsFogEnabled = false;
-	m_Params.m_FpsFogMode = 0;
-	m_Params.m_FpsFogRadiusTiles = 0;
-	m_Params.m_FpsFogZoomPercent = 0;
-	m_Params.m_FpsFogCullMapTiles = false;
 }
 
 void CMapLayers::OnInit()
@@ -36,19 +33,19 @@ CCamera *CMapLayers::GetCurCamera()
 
 void CMapLayers::OnMapLoad()
 {
-	FRenderUploadCallback FRenderCallback = [&](const char *pTitle, const char *pMessage, int IncreaseCounter) { GameClient()->m_Menus.RenderLoading(pTitle, pMessage, IncreaseCounter); };
-	auto FRenderCallbackOptional = std::make_optional<FRenderUploadCallback>(FRenderCallback);
+	char aCaption[64 + MAX_MAP_LENGTH];
+	str_format(aCaption, sizeof(aCaption), "%s: %s", Localize("Loading map"), m_pLayers->Map()->BaseName());
 
-	const char *pLoadingTitle = Localize("Loading map");
-	const char *pLoadingMessage = Localize("Uploading map data to GPU");
-	GameClient()->m_Menus.RenderLoading(pLoadingTitle, pLoadingMessage, 0);
+	FCallbackMapRendererInit ProgressBarCallback = [&](int GroupId, int NumGroups, int LayerId, int NumLayers) {
+		GameClient()->m_Menus.RenderLoadingDirect(aCaption, Localize("Initializing layers"), std::make_optional((GroupId + (float)LayerId / NumLayers) / (float)NumGroups));
+	};
 
 	// can't do that in CMapLayers::OnInit, because some of this interfaces are not available yet
 	m_MapRenderer.OnInit(Graphics(), TextRender(), RenderMap());
 
 	m_EnvEvaluator = CEnvelopeState(m_pLayers->Map(), m_OnlineOnly);
 	m_EnvEvaluator.OnInterfacesInit(GameClient());
-	m_MapRenderer.Load(m_Type, m_pLayers, m_pImages, &m_EnvEvaluator, FRenderCallbackOptional);
+	m_MapRenderer.Load(m_Type, m_pLayers, m_pImages, &m_EnvEvaluator, ProgressBarCallback);
 }
 
 void CMapLayers::OnRender()
@@ -66,12 +63,13 @@ void CMapLayers::OnRender()
 	m_Params.m_DebugRenderClusterClips = g_Config.m_DbgRenderClusterClips;
 	m_Params.m_DebugRenderTileClips = g_Config.m_DbgRenderTileClips;
 
-	const bool OptimizerFpsFogEnabled = GameClient()->OptimizerFpsFogEnabled();
-	m_Params.m_FpsFogEnabled = OptimizerFpsFogEnabled;
-	m_Params.m_FpsFogMode = g_Config.m_BcOptimizerFpsFogMode;
-	m_Params.m_FpsFogRadiusTiles = g_Config.m_BcOptimizerFpsFogRadiusTiles;
-	m_Params.m_FpsFogZoomPercent = g_Config.m_BcOptimizerFpsFogZoomPercent;
-	m_Params.m_FpsFogCullMapTiles = OptimizerFpsFogEnabled && g_Config.m_BcOptimizerFpsFogCullMapTiles != 0;
+	// bestclient
+	m_Params.m_FpsFogEnabled = GameClient()->OptimizerFpsFogEnabled();
+	m_Params.m_FpsFogCullMapTiles = GameClient()->m_Optimizer.CullMapTiles();
+	m_Params.m_FpsFogHalfW = GameClient()->m_Optimizer.FogHalfW();
+	m_Params.m_FpsFogHalfH = GameClient()->m_Optimizer.FogHalfH();
+	m_Params.m_DisableMapQuads = GameClient()->m_Optimizer.DisableQuads();
+	// bestclient
 
 	m_MapRenderer.Render(m_Params);
 }

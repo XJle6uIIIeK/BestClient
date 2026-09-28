@@ -1,12 +1,14 @@
 /* Copyright © 2026 BestProject Team */
 #include "show_points.h"
 
-#include <base/system.h>
+#include <base/mem.h>
+#include <base/str.h>
+#include <base/time.h>
 
 #include <engine/client.h>
+#include <engine/http.h>
 #include <engine/serverbrowser.h>
 #include <engine/shared/config.h>
-#include <engine/shared/http.h>
 #include <engine/shared/json.h>
 
 #include <game/client/gameclient.h>
@@ -80,9 +82,7 @@ const char *CShowPoints::CurrentCommunityId() const
 {
 	m_aCommunityIdBuf[0] = '\0';
 
-	CServerInfo ServerInfo;
-	mem_zero(&ServerInfo, sizeof(ServerInfo));
-	Client()->GetServerInfo(&ServerInfo);
+	const CServerInfo &ServerInfo = Client()->ServerInfo();
 
 	if(ServerInfo.m_aCommunityId[0] != '\0')
 	{
@@ -120,10 +120,7 @@ CShowPoints::EProvider CShowPoints::CurrentProvider() const
 			return EProvider::Ego;
 	}
 
-	CServerInfo ServerInfo;
-	mem_zero(&ServerInfo, sizeof(ServerInfo));
-	Client()->GetServerInfo(&ServerInfo);
-	// Avoid matching unrelated names that merely contain "ego" (e.g. "Diego").
+	const CServerInfo &ServerInfo = Client()->ServerInfo();
 	if(str_find_nocase(ServerInfo.m_aName, "EGO |") ||
 		str_find_nocase(ServerInfo.m_aName, "eternal-gores") ||
 		str_find_nocase(ServerInfo.m_aName, "eternal gores"))
@@ -247,9 +244,7 @@ void CShowPoints::StartRequest(const std::string &Name, EProvider Provider)
 	}
 	else if(Provider == EProvider::Legit)
 	{
-		CServerInfo ServerInfo;
-		mem_zero(&ServerInfo, sizeof(ServerInfo));
-		Client()->GetServerInfo(&ServerInfo);
+		const CServerInfo &ServerInfo = Client()->ServerInfo();
 		const bool IsDDraceMode = str_find_nocase(ServerInfo.m_aGameType, "DDraceNetwork") != nullptr;
 
 		char aEscaped[256];
@@ -263,7 +258,7 @@ void CShowPoints::StartRequest(const std::string &Name, EProvider Provider)
 		str_format(aUrl, sizeof(aUrl), "https://ru.ddnet.org/players/?json2=%s", aEscaped);
 	}
 
-	std::shared_ptr<CHttpRequest> pReq = HttpGet(aUrl);
+	std::shared_ptr<IHttpRequest> pReq = HttpGet(aUrl);
 	pReq->Timeout(CTimeout{8000, 0, 500, 5});
 	pReq->LogProgress(HTTPLOG::FAILURE);
 	pReq->FailOnErrorStatus(false);
@@ -326,8 +321,6 @@ void CShowPoints::PumpQueue()
 		return;
 	}
 
-	// Only clear when switching between real providers — not on first activation
-	// (m_LastProvider starts as None and would wipe a freshly filled queue).
 	if(m_LastProvider != EProvider::None && m_LastProvider != Provider)
 		ClearPending();
 	m_LastProvider = Provider;
@@ -365,7 +358,6 @@ void CShowPoints::OnUpdate()
 
 	ProcessInFlight();
 
-	// Only dequeue while the scoreboard is open — avoids background spam.
 	if(GameClient()->m_Scoreboard.IsActive())
 		PumpQueue();
 }

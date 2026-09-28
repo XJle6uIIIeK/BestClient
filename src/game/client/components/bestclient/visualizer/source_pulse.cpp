@@ -5,10 +5,9 @@
 #include "source_priority.h"
 #include "smoother.h"
 
-#include <base/system.h>
+#include <base/dbg.h>
+#include <base/str.h>
 #include <base/time.h>
-
-#include <engine/shared/config.h>
 
 #include <algorithm>
 #include <cctype>
@@ -36,7 +35,8 @@ namespace
 #if defined(CONF_PLATFORM_LINUX) && defined(BC_MUSICPLAYER_HAS_PULSE) && BC_MUSICPLAYER_HAS_PULSE
 static bool VisualizerDebugEnabled(int Level)
 {
-	return g_Config.m_DbgMusicPlayer >= Level;
+	(void)Level;
+	return false;
 }
 
 static void VisualizerDebugLog(int Level, const char *pFmt, ...)

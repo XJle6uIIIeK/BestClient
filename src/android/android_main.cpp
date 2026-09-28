@@ -1,14 +1,17 @@
 #include "android_main.h"
 
+#include <base/fs.h>
 #include <base/hash.h>
+#include <base/io.h>
 #include <base/log.h>
-#include <base/system.h>
+#include <base/str.h>
 
 #include <engine/shared/linereader.h>
 
 #include <SDL.h>
 #include <jni.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -278,25 +281,14 @@ bool StartAndroidServer(const char **ppArguments, size_t NumArguments)
 		pEnv->DeleteLocalRef(ArgumentString);
 	}
 
-	jmethodID MethodId = pEnv->GetMethodID(ActivityClass, "startServer", "([Ljava/lang/String;)Z");
-	jboolean Result = JNI_FALSE;
-	if(MethodId != nullptr)
-	{
-		Result = pEnv->CallBooleanMethod(Activity, MethodId, ArgumentsArray);
-	}
-	if(pEnv->ExceptionCheck())
-	{
-		pEnv->ExceptionDescribe();
-		pEnv->ExceptionClear();
-		Result = JNI_FALSE;
-		log_error("android", "Failed to start local server service");
-	}
+	jmethodID MethodId = pEnv->GetMethodID(ActivityClass, "startServer", "([Ljava/lang/String;)V");
+	pEnv->CallVoidMethod(Activity, MethodId, ArgumentsArray);
 
 	pEnv->DeleteLocalRef(ArgumentsArray);
 	pEnv->DeleteLocalRef(Activity);
 	pEnv->DeleteLocalRef(ActivityClass);
 
-	return Result == JNI_TRUE;
+	return true;
 }
 
 void ExecuteAndroidServerCommand(const char *pCommand)
@@ -324,24 +316,6 @@ bool IsAndroidServerRunning()
 	jmethodID MethodId = pEnv->GetMethodID(ActivityClass, "isServerRunning", "()Z");
 	const bool Result = pEnv->CallBooleanMethod(Activity, MethodId);
 
-	pEnv->DeleteLocalRef(Activity);
-	pEnv->DeleteLocalRef(ActivityClass);
-
-	return Result;
-}
-
-bool InstallAndroidApk(const char *pApkPath)
-{
-	JNIEnv *pEnv = static_cast<JNIEnv *>(SDL_AndroidGetJNIEnv());
-	jobject Activity = (jobject)SDL_AndroidGetActivity();
-	jclass ActivityClass = pEnv->GetObjectClass(Activity);
-
-	jstring ApkPath = pEnv->NewStringUTF(pApkPath);
-
-	jmethodID MethodId = pEnv->GetMethodID(ActivityClass, "installApk", "(Ljava/lang/String;)Z");
-	const bool Result = pEnv->CallBooleanMethod(Activity, MethodId, ApkPath);
-
-	pEnv->DeleteLocalRef(ApkPath);
 	pEnv->DeleteLocalRef(Activity);
 	pEnv->DeleteLocalRef(ActivityClass);
 

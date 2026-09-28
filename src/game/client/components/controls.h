@@ -44,12 +44,6 @@ public:
 	CNetObj_PlayerInput m_aFastInput[NUM_DUMMIES];
 	bool m_FastInputHookAction = false;
 	bool m_FastInputFireAction = false;
-	bool m_WeaponsGot = false;
-	int m_aSnapTapAppliedDirection[NUM_DUMMIES];
-	int m_aSnapTapLastPressedDirection[NUM_DUMMIES];
-	int64_t m_aSnapTapLastPressedTime[NUM_DUMMIES];
-	int m_aSnapTapPrevLeft[NUM_DUMMIES];
-	int m_aSnapTapPrevRight[NUM_DUMMIES];
 
 	CControls();
 	int Sizeof() const override { return sizeof(*this); }
@@ -65,19 +59,8 @@ public:
 	void ClampMousePos();
 	void ResetInput(int Dummy);
 	bool CheckNewInput();
-	void GoresMode();
-	// Edge detection (m_aSnapTapPrev*, m_aSnapTapLastPressed*) must be updated exactly once per real key
-	// transition. SnapInput() runs at tick rate and is the authoritative caller (UpdateState = true);
-	// CheckNewInput() / cloud input run every render frame for fast-input prediction and must only read
-	// the already resolved direction (UpdateState = false), otherwise they race the edge detection and
-	// cause mispredicted stutter when tapping the opposite direction while holding the other.
-	int ResolveMovementDirection(int Dummy, bool LeftPressed, bool RightPressed, bool UpdateState);
 
 private:
-	bool IsSnapTapActive() const;
-	bool UseGammaInputMovement() const;
-	void UpdateSnapTapState(int Dummy, bool LeftPressed, bool RightPressed);
-	int ResolveSnapTapDirection(int Dummy, bool LeftPressed, bool RightPressed);
 	static void ConKeyInputState(IConsole::IResult *pResult, void *pUserData);
 	static void ConKeyInputCounter(IConsole::IResult *pResult, void *pUserData);
 	static void ConKeyInputSet(IConsole::IResult *pResult, void *pUserData);

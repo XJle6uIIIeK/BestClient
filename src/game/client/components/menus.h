@@ -4,10 +4,10 @@
 #define GAME_CLIENT_COMPONENTS_MENUS_H
 
 #include <base/bytes.h>
+#include <base/str.h>
 #include <base/types.h>
 #include <base/vmath.h>
 
-#include <engine/config.h>
 #include <engine/console.h>
 #include <engine/demo.h>
 #include <engine/friends.h>
@@ -16,9 +16,11 @@
 #include <engine/textrender.h>
 
 #include <game/client/component.h>
+// bestclient
+#include <game/client/components/bestclient/server_map_preview.h>
+// bestclient
 #include <game/client/components/community_icons.h>
 #include <game/client/components/mapimages.h>
-#include <game/client/components/menu_media_background.h>
 #include <game/client/components/menus_ingame_touch_controls.h>
 #include <game/client/components/menus_settings_controls.h>
 #include <game/client/components/menus_start.h>
@@ -28,16 +30,13 @@
 #include <game/client/ui.h>
 #include <game/voting.h>
 
-#include <array>
 #include <chrono>
-#include <deque>
 #include <optional>
-#include <set>
-#include <string>
 #include <vector>
 
-class CImageInfo;
-struct CDataSprite;
+#include <array>
+#include <set>
+#include <string>
 
 class CMenus : public CComponent
 {
@@ -55,8 +54,10 @@ class CMenus : public CComponent
 public:
 	int DoButton_Toggle(const void *pId, int Checked, const CUIRect *pRect, bool Active, unsigned Flags = BUTTONFLAG_LEFT);
 	int DoButton_Menu(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, unsigned Flags = BUTTONFLAG_LEFT, const char *pImageName = nullptr, int Corners = IGraphics::CORNER_ALL, float Rounding = 5.0f, float FontFactor = 0.0f, ColorRGBA Color = ColorRGBA(1.0f, 1.0f, 1.0f, 0.5f));
+	// bestclient
 	int DoButton_MenuEx(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, unsigned Flags, const char *pImageName, int Corners, float Rounding, float FontFactor, ColorRGBA Color, bool AlwaysColoredImage);
-	int DoButton_MenuTab(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, int Corners, SUIAnimator *pAnimator = nullptr, const ColorRGBA *pDefaultColor = nullptr, const ColorRGBA *pActiveColor = nullptr, const ColorRGBA *pHoverColor = nullptr, float EdgeRounding = 10.0f, const CCommunityIcon *pCommunityIcon = nullptr, bool AnimateChecked = true, int HoverCorners = IGraphics::CORNER_NONE, float HoverRounding = -1.0f);
+	int DoButton_MenuTab(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, int Corners, SUIAnimator *pAnimator = nullptr, const ColorRGBA *pDefaultColor = nullptr, const ColorRGBA *pActiveColor = nullptr, const ColorRGBA *pHoverColor = nullptr, float EdgeRounding = 10.0f, const CCommunityIcon *pCommunityIcon = nullptr, bool AnimateChecked = true, int HoverCorners = IGraphics::CORNER_NONE, float HoverRounding = -1.0f, float AlphaMul = 1.0f);
+	// bestclient
 
 	int DoButton_CheckBox_Common(const void *pId, const char *pText, const char *pBoxText, const CUIRect *pRect, unsigned Flags);
 	int DoButton_CheckBox(const void *pId, const char *pText, int Checked, const CUIRect *pRect);
@@ -64,27 +65,25 @@ public:
 	int DoButton_CheckBox_Number(const void *pId, const char *pText, int Checked, const CUIRect *pRect);
 
 	bool DoSliderWithScaledValue(const void *pId, int *pOption, const CUIRect *pRect, const char *pStr, int Min, int Max, int Scale, const IScrollbarScale *pScale, unsigned Flags = 0u, const char *pSuffix = "");
-	bool DoSliderWithDividedValue(const void *pId, int *pOption, const CUIRect *pRect, const char *pStr, int Min, int Max, int Divisor, const IScrollbarScale *pScale, unsigned Flags = 0u, const char *pSuffix = "");
+	// bestclient
 	void DoTickAmountSlider(int *pValue, const CUIRect *pRect, const char *pLabel, int Min, int Max, int Scale = 100);
+	// bestclient
 	bool DoEditBoxWithLabel(CLineInput *LineInput, const CUIRect *pRect, const char *pLabel, const char *pDefault, char *pBuf, size_t BufSize);
 	bool DoLine_RadioMenu(CUIRect &View, const char *pLabel, std::vector<CButtonContainer> &vButtonContainers, const std::vector<const char *> &vLabels, const std::vector<int> &vValues, int &Value);
 	bool DoLine_KeyReader(CUIRect &View, CButtonContainer &ReaderButton, CButtonContainer &ClearButton, const char *pName, const char *pCommand);
 
 private:
 	CUi::SColorPickerPopupContext m_ColorPickerPopupContext;
-	ColorHSLA DoLine_ColorPicker(CButtonContainer *pResetId, float LineSize, float LabelSize, float BottomMargin, CUIRect *pMainRect, const char *pText, unsigned int *pColorValue, ColorRGBA DefaultColor, bool CheckBoxSpacing = true, int *pCheckBoxValue = nullptr, bool Alpha = false, bool ShowReset = true);
-	ColorHSLA DoButton_ColorPicker(const CUIRect *pRect, unsigned int *pHslaColor, bool Alpha);
+	ColorHSLA DoLine_ColorPicker(CButtonContainer *pResetId, float LineSize, float LabelSize, float BottomMargin, CUIRect *pMainRect, const char *pText, unsigned int *pColorValue, ColorRGBA DefaultColor, bool CheckBoxSpacing = true, int *pCheckBoxValue = nullptr, bool Alpha = false);
+	ColorHSLA DoButton_ColorPicker(const CUIRect *pRect, unsigned int *pHslaColor, bool Alpha, ColorRGBA DefaultColor = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f), bool HasDefault = false);
 
-	void DoLaserPreview(const CUIRect *pRect, ColorHSLA OutlineColor, ColorHSLA InnerColor, int LaserType);
 	int DoButton_GridHeader(const void *pId, const char *pText, int Checked, const CUIRect *pRect, int Align = TEXTALIGN_ML);
 	int DoButton_Favorite(const void *pButtonId, const void *pParentId, bool Checked, const CUIRect *pRect);
 
-	bool m_SkinListScrollToSelected = false;
 	std::optional<std::chrono::nanoseconds> m_SkinList7LastRefreshTime;
 	std::optional<std::chrono::nanoseconds> m_SkinPartsList7LastRefreshTime;
 
 	int m_DirectionQuadContainerIndex;
-	CMenuMediaBackground m_MenuMediaBackground;
 
 	// menus_settings_assets.cpp
 public:
@@ -99,6 +98,11 @@ public:
 		bool m_Deletable = false;
 
 		bool operator<(const SCustomItem &Other) const { return str_comp(m_aName, Other.m_aName) < 0; }
+	};
+
+	enum
+	{
+		NUM_ASSET_FAVORITE_TABS = 9,
 	};
 
 	struct SCustomEntities : public SCustomItem
@@ -142,11 +146,6 @@ public:
 	{
 	};
 
-	enum
-	{
-		NUM_ASSET_FAVORITE_TABS = 9,
-	};
-
 protected:
 	std::vector<SCustomEntities> m_vEntitiesList;
 	std::vector<SCustomGame> m_vGameList;
@@ -178,8 +177,6 @@ protected:
 	static void ConchainAssetEmoticons(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConchainAssetHud(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConchainAssetExtras(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
-	static void ConchainAssetCursor(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
-	static void ConchainAssetArrow(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConchainSndPack(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConAddFavoriteAsset(IConsole::IResult *pResult, void *pUserData);
 	static void ConRemoveFavoriteAsset(IConsole::IResult *pResult, void *pUserData);
@@ -237,7 +234,6 @@ protected:
 
 	bool m_CreateDefaultFavoriteCommunities = false;
 	bool m_ForceRefreshLanPage = false;
-	int64_t m_LastServerBrowserRefreshTick = 0; // BestClient
 
 	char m_aNextServer[256];
 
@@ -309,15 +305,6 @@ protected:
 	bool m_NeedRestartUpdate;
 	bool m_NeedSendinfo;
 	bool m_NeedSendDummyinfo;
-	int m_SettingPlayerPage;
-
-	// 0.7 skins
-	bool m_CustomSkinMenu = false;
-	int m_TeePartSelected = protocol7::SKINPART_BODY;
-	const CSkins7::CSkin *m_pSelectedSkin = nullptr;
-	CLineInputBuffered<protocol7::MAX_SKIN_ARRAY_SIZE, protocol7::MAX_SKIN_LENGTH> m_SkinNameInput;
-	bool m_SkinPartListNeedsUpdate = false;
-	void PopupConfirmDeleteSkin7();
 
 	// for map download popup
 	int64_t m_DownloadLastCheckTime;
@@ -377,10 +364,10 @@ protected:
 
 		bool operator<(const CDemoItem &Other) const
 		{
-			if(!str_comp(m_aFilename, ".."))
-				return true;
 			if(!str_comp(Other.m_aFilename, ".."))
 				return false;
+			if(!str_comp(m_aFilename, ".."))
+				return true;
 			if(m_IsDir && !Other.m_IsDir)
 				return true;
 			if(!m_IsDir && Other.m_IsDir)
@@ -427,6 +414,7 @@ protected:
 	std::chrono::nanoseconds m_DemoPopulateStartTime{0};
 
 	void DemolistOnUpdate(bool Reset);
+	void DemolistSelectNeighbor();
 	static int DemolistFetchCallback(const CFsFileInfo *pInfo, int IsDir, int StorageType, void *pUser);
 
 	// friends
@@ -536,16 +524,6 @@ protected:
 #endif
 	void RenderMenubar(CUIRect Box, IClient::EClientState ClientState);
 	void RenderNews(CUIRect MainView);
-	void RenderClans(CUIRect MainView);
-	void RenderClansAuth(CUIRect MainView);
-	void RenderClansLanding(CUIRect MainView);
-	void RenderClansSetup(CUIRect MainView);
-	void RenderClansPage(CUIRect MainView);
-	void RenderClansPreview(CUIRect MainView);
-	void RenderClansApplications(CUIRect MainView);
-	void RenderClansAnnouncements(CUIRect MainView);
-	void RenderClansSettings(CUIRect MainView);
-	void RenderClansRecent(CUIRect MainView);
 	static void ConchainBackgroundEntities(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConchainUpdateMusicState(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	void UpdateMusicState();
@@ -564,8 +542,10 @@ protected:
 	void HandleDemoSeeking(float PositionToSeek, float TimeToSeek);
 	void RenderDemoPlayer(CUIRect MainView);
 	void RenderDemoPlayerSliceSavePopup(CUIRect MainView);
+	// bestclient
 	SPopupMenuId m_DemoCameraEffectsPopupId;
 	static CUi::EPopupMenuFunctionResult PopupDemoCameraEffects(void *pContext, CUIRect View, bool Active);
+	// bestclient
 	bool m_DemoBrowserListInitialized = false;
 	void RenderDemoBrowser(CUIRect MainView);
 	void RenderDemoBrowserList(CUIRect ListView, bool &WasListboxItemActivated);
@@ -608,7 +588,9 @@ protected:
 	void RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItemActivated);
 	void Connect(const char *pAddress);
 	void PopupConfirmSwitchServer();
+	// bestclient
 	void ToggleBestClientServerFilter();
+	// bestclient
 	void RenderServerbrowserFilters(CUIRect View);
 	void ResetServerbrowserFilters();
 	void RenderServerbrowserDDNetFilter(CUIRect View,
@@ -630,7 +612,9 @@ protected:
 	static CUi::EPopupMenuFunctionResult PopupCountrySelection(void *pContext, CUIRect View, bool Active);
 	void RenderServerbrowserInfo(CUIRect View);
 	void RenderServerbrowserInfoScoreboard(CUIRect View, const CServerInfo *pSelectedServer);
+	// bestclient
 	void RenderServerbrowserBestClient(CUIRect View);
+	// bestclient
 	void RenderServerbrowserFriends(CUIRect View);
 	void FriendlistOnUpdate();
 	void PopupConfirmRemoveFriend();
@@ -647,36 +631,88 @@ protected:
 	void UpdateCommunityCache(bool Force);
 
 	// found in menus_settings.cpp
-	void RenderLanguageSettings(CUIRect MainView);
-	bool RenderLanguageSelection(CUIRect MainView);
-	void RenderThemeSelection(CUIRect MainView);
-	void RenderSettingsGeneral(CUIRect MainView);
-	void RenderSettingsPlayer(CUIRect MainView);
-	void RenderSettingsTee(CUIRect MainView);
-	struct SPopupSettingsCountrySelectionContext
-	{
-		CMenus *m_pMenus;
-		int *m_pCountry;
-		int m_Selection;
-		bool m_New;
-	};
-	static CUi::EPopupMenuFunctionResult PopupSettingsCountrySelection(void *pContext, CUIRect View, bool Active);
-	void RenderSettingsTee7(CUIRect MainView);
-	void RenderSettingsTeeCustom7(CUIRect MainView);
-	void RenderSkinSelection7(CUIRect MainView);
-	void RenderSkinPartSelection7(CUIRect MainView);
-	void RenderSettingsGraphics(CUIRect MainView);
-	void RenderSettingsSound(CUIRect MainView);
 	void RenderSettings(CUIRect MainView);
-	void RenderSettingsCustom(CUIRect MainView);
+	bool RenderHslaScrollbars(CUIRect *pRect, unsigned int *pColor, bool Alpha, float DarkestLight);
+
+	// found in menus_settings_assets.cpp
+	void RenderSettingsAssets(CUIRect MainView);
+
+	// found in menus_settings_appearance.cpp
+	void RenderSettingsAppearance(CUIRect MainView);
+	void DoLaserPreview(const CUIRect *pRect, ColorHSLA OutlineColor, ColorHSLA InnerColor, int LaserType);
+	// bestclient
+	void DoRocketPreview(const CUIRect *pRect);
+	void RenderSettingsBestClientWeaponGlow(CUIRect &Column);
+	void RenderSettingsBestClientFx(CUIRect &Column, bool HookColumn);
+	// bestclient
 
 	// found in menus_settings_controls.cpp
 	// TODO: Change PopupConfirm to avoid using a function pointer to a CMenus
 	//       member function, to move this function to CMenusSettingsControls
 	void ResetSettingsControls();
 
+	// found in menus_settings_credits.cpp
+	void RenderSettingsCredits(CUIRect MainView);
+
+	// found in menus_settings_ddnet.cpp
+	void RenderSettingsDDNet(CUIRect MainView);
+
+	// found in menus_settings_general.cpp
+	void RenderSettingsGeneral(CUIRect MainView);
+	void RenderThemeSelection(CUIRect MainView);
+
+	// found in menus_settings_graphics.cpp
+	void RenderSettingsGraphics(CUIRect MainView);
+
+	// found in menus_settings_language.cpp
+	void RenderLanguageSettings(CUIRect MainView);
+	bool RenderLanguageSelection(CUIRect MainView);
+
+	// found in menus_settings_player.cpp
+	void RenderSettingsPlayer(CUIRect MainView);
+	struct SPopupSettingsCountrySelectionContext // bestclient
+	{
+		CMenus *m_pMenus;
+		int *m_pCountry;
+		int m_Selection;
+		bool m_New;
+	};
+	static CUi::EPopupMenuFunctionResult PopupSettingsCountrySelection(void *pContext, CUIRect View, bool Active); // bestclient
+
+	// found in menus_settings_sound.cpp
+	void RenderSettingsSound(CUIRect MainView);
+
+	// bestclient
+	static float FrozenSkinSettingsHeight();
+	void RenderFrozenSkinSettings(CUIRect &View);
+	struct SPopupVoiceModerationContext
+	{
+		CMenus *m_pMenus;
+	};
+	static CUi::EPopupMenuFunctionResult PopupVoiceModeration(void *pContext, CUIRect View, bool Active);
+	// bestclient
+
+	// found in menus_settings_tee.cpp
+	void RenderSettingsTee(CUIRect MainView);
+	bool m_SkinListScrollToSelected = false;
+
+	// found in menus_settings_tee7.cpp
+	void RenderSettingsTee7(CUIRect MainView);
+	void PopupConfirmDeleteSkin7();
+	void RenderSettingsTeeCustom7(CUIRect MainView);
+	void RenderSkinSelection7(CUIRect MainView);
+	void RenderSkinPartSelection7(CUIRect MainView);
+	bool m_CustomSkinMenu = false;
+	int m_TeePartSelected = protocol7::SKINPART_BODY;
+	const CSkins7::CSkin *m_pSelectedSkin = nullptr;
+	int m_SelectedSkinIndex7 = -1;
+	int m_DeletedSkinIndex7 = -1;
+	CLineInputBuffered<protocol7::MAX_SKIN_ARRAY_SIZE, protocol7::MAX_SKIN_LENGTH> m_SkinNameInput;
+	bool m_SkinPartListNeedsUpdate = false;
+
 	std::vector<CButtonContainer> m_vButtonContainersNamePlateShow = {{}, {}, {}, {}};
 	std::vector<CButtonContainer> m_vButtonContainersNamePlateKeyPresses = {{}, {}, {}, {}};
+	std::vector<CButtonContainer> m_vButtonContainersAntiPingPlayers = {{}, {}, {}};
 
 	class CMapListItem
 	{
@@ -697,10 +733,10 @@ protected:
 
 	static bool CompareFilenameAscending(const CMapListItem Lhs, const CMapListItem Rhs)
 	{
-		if(str_comp(Lhs.m_aFilename, "..") == 0)
-			return true;
 		if(str_comp(Rhs.m_aFilename, "..") == 0)
 			return false;
+		if(str_comp(Lhs.m_aFilename, "..") == 0)
+			return true;
 		if(Lhs.m_IsDirectory != Rhs.m_IsDirectory)
 			return Lhs.m_IsDirectory;
 		return str_comp_filenames(Lhs.m_aFilename, Rhs.m_aFilename) < 0;
@@ -712,6 +748,7 @@ protected:
 	void UpdateColors();
 
 	IGraphics::CTextureHandle m_TextureBlob;
+	// bestclient
 	IGraphics::CTextureHandle m_BcLogoTexture;
 
 public:
@@ -722,6 +759,7 @@ public:
 	CMenus();
 	int Sizeof() const override { return sizeof(*this); }
 
+	void RenderLoadingDirect(const char *pCaption, const char *pContent, std::optional<float> Progress);
 	void RenderLoading(const char *pCaption, const char *pContent, int IncreaseCounter);
 	void FinishLoading();
 
@@ -735,7 +773,6 @@ public:
 
 	void OnStateChange(int NewState, int OldState) override;
 	void OnWindowResize() override;
-	void OnReset() override;
 	void OnRender() override;
 	bool OnInput(const IInput::CEvent &Event) override;
 	bool OnCursorMove(float x, float y, IInput::ECursorType CursorType) override;
@@ -760,10 +797,18 @@ public:
 		PAGE_SETTINGS,
 		PAGE_NETWORK,
 		PAGE_GHOST,
-		PAGE_CLANS,
 
 		PAGE_LENGTH,
 	};
+
+	// bestclient
+	bool IsIngameGamePage() const { return m_MenuActive && Client()->State() == IClient::STATE_ONLINE && m_GamePage == PAGE_GAME; }
+	bool IsServerBrowserPageActive() const
+	{
+		return (Client()->State() == IClient::STATE_OFFLINE && m_MenuPage >= PAGE_INTERNET && m_MenuPage <= PAGE_FAVORITE_COMMUNITY_5) ||
+			(Client()->State() == IClient::STATE_ONLINE && m_GamePage == PAGE_NETWORK);
+	}
+	// bestclient
 
 	enum
 	{
@@ -777,11 +822,11 @@ public:
 		SETTINGS_SOUND,
 		SETTINGS_DDNET,
 		SETTINGS_ASSETS,
-		SETTINGS_TCLIENT,
-		SETTINGS_BESTCLIENT,
-		SETTINGS_PROFILES,
-		SETTINGS_CONFIGS,
-
+		SETTINGS_TCLIENT, // TClient
+		SETTINGS_BESTCLIENT, // bestclient
+		SETTINGS_PROFILES, // TClient
+		SETTINGS_CONFIGS, // TClient
+		SETTINGS_CREDITS,
 		SETTINGS_LENGTH,
 	};
 
@@ -811,7 +856,9 @@ public:
 		SMALL_TAB_SERVER,
 		SMALL_TAB_BROWSER_FILTER,
 		SMALL_TAB_BROWSER_INFO,
+		// bestclient
 		SMALL_TAB_BROWSER_BESTCLIENT,
+		// bestclient
 		SMALL_TAB_BROWSER_FRIENDS,
 
 		SMALL_TAB_LENGTH,
@@ -898,6 +945,7 @@ public:
 		POPUP_RESTART,
 		POPUP_WARNING,
 		POPUP_SAVE_SKIN,
+		POPUP_STYLE_PICKER, // bestclient
 	};
 
 	enum
@@ -916,6 +964,9 @@ public:
 
 private:
 	CCommunityIcons m_CommunityIcons;
+	// bestclient
+	CServerMapPreview m_ServerMapPreview;
+	// bestclient
 	CMenusIngameTouchControls m_MenusIngameTouchControls;
 	friend CMenusIngameTouchControls;
 	CMenusSettingsControls m_MenusSettingsControls;
@@ -928,155 +979,7 @@ private:
 	void RenderInGameNetwork(CUIRect MainView);
 	void RenderGhost(CUIRect MainView);
 
-	// found in menus_settings.cpp
-	void RenderSettingsDDNet(CUIRect MainView);
-	void RenderSettingsAppearance(CUIRect MainView);
-
-	// found in menus_bestclient.cpp
-	struct SPopupVoiceModerationContext
-	{
-		CMenus *m_pMenus;
-	};
-	static CUi::EPopupMenuFunctionResult PopupVoiceModeration(void *pContext, CUIRect View, bool Active);
-	void RenderSettingsBestClient(CUIRect MainView);
-	void RenderSettingsBestClientInfo(CUIRect MainView);
-	void RenderSettingsBestClientVisuals(CUIRect MainView);
-	void RenderSettingsBestClientGameplay(CUIRect MainView);
-	void RenderSettingsBestClientOthers(CUIRect MainView);
-
-	// found in menus_games.cpp
-	void RenderSettingsBestClientFun(CUIRect MainView);
-
-	void RenderSettingsBestClientChatMediaBlock(CUIRect &Column);
-
-public:
-	bool IsIngameGamePage() const { return m_MenuActive && Client()->State() == IClient::STATE_ONLINE && m_GamePage == PAGE_GAME; }
-	bool IsIngameSettingsPage() const { return m_MenuActive && Client()->State() == IClient::STATE_ONLINE && m_GamePage == PAGE_SETTINGS; }
-	int MenuPage() const { return m_MenuPage; }
-	int GamePage() const { return m_GamePage; }
-
-	// found in bestclient/menus_assets_editor.cpp
-	enum
-	{
-		ASSETS_EDITOR_TYPE_GAME = 0,
-		ASSETS_EDITOR_TYPE_EMOTICONS,
-		ASSETS_EDITOR_TYPE_ENTITIES,
-		ASSETS_EDITOR_TYPE_HUD,
-		ASSETS_EDITOR_TYPE_PARTICLES,
-		ASSETS_EDITOR_TYPE_EXTRAS,
-		ASSETS_EDITOR_TYPE_COUNT,
-	};
-
-	struct SAssetsEditorAssetEntry
-	{
-		IGraphics::CTextureHandle m_PreviewTexture;
-		int m_PreviewWidth = 0;
-		int m_PreviewHeight = 0;
-		char m_aName[64] = {0};
-		char m_aPath[IO_MAX_PATH_LENGTH] = {0};
-		bool m_IsDefault = false;
-	};
-
-	enum
-	{
-		ASSETS_EDITOR_COLOR_BLEND_TEELIKE = 0,
-		ASSETS_EDITOR_COLOR_BLEND_SCREEN,
-		ASSETS_EDITOR_COLOR_BLEND_MULTIPLY,
-		ASSETS_EDITOR_COLOR_BLEND_OVERLAY,
-		ASSETS_EDITOR_COLOR_BLEND_COUNT,
-	};
-
-	struct SAssetsEditorPartSlot
-	{
-		int m_SpriteId = -1;
-		int m_SourceSpriteId = -1;
-		int m_Group = 0;
-		int m_DstX = 0;
-		int m_DstY = 0;
-		int m_DstW = 0;
-		int m_DstH = 0;
-		int m_SrcX = 0;
-		int m_SrcY = 0;
-		int m_SrcW = 0;
-		int m_SrcH = 0;
-		char m_aFamilyKey[64] = {0};
-		char m_aSourceAsset[64] = {0};
-		bool m_UseCustomColor = false;
-		unsigned m_CustomColor = 65408; // default matches player_color_body
-		int m_ColorBlendMode = ASSETS_EDITOR_COLOR_BLEND_TEELIKE;
-		int m_ColorOpacity = 100; // 0-100
-	};
-
-private:
-	struct SAssetsEditorState
-	{
-		bool m_VisualsEditorOpen = false;
-		bool m_VisualsEditorInitialized = false;
-		int m_Type = ASSETS_EDITOR_TYPE_GAME;
-		int m_aMainAssetIndex[ASSETS_EDITOR_TYPE_COUNT] = {0};
-		int m_aDonorAssetIndex[ASSETS_EDITOR_TYPE_COUNT] = {0};
-		bool m_ShowGrid = true;
-		bool m_ApplySameSize = false;
-		int m_ApplySameSizeScope = 0;
-		bool m_DragActive = false;
-		int m_ActiveDraggedSlotIndex = -1;
-		char m_aDraggedSourceAsset[64] = {0};
-		int m_HoveredDonorSlotIndex = -1;
-		int m_HoveredTargetSlotIndex = -1;
-		bool m_DirtyPreview = true;
-		bool m_LastComposeFailed = false;
-		char m_aExportName[64] = {0};
-		char m_aaExportNameByType[ASSETS_EDITOR_TYPE_COUNT][64] = {};
-		bool m_aExportNameTouchedByUser[ASSETS_EDITOR_TYPE_COUNT] = {};
-		char m_aStatusMessage[256] = {0};
-		bool m_StatusIsError = false;
-		bool m_HasUnsavedChanges = false;
-		bool m_PendingCloseRequest = false;
-		bool m_ShowExitConfirm = false;
-		bool m_FullscreenOpen = true;
-		int m_HoverCycleSlotIndex = -1;
-		int m_HoverCyclePositionX = -1;
-		int m_HoverCyclePositionY = -1;
-		int m_HoverCycleCandidateCursor = 0;
-		std::vector<int> m_vHoverCycleCandidates;
-		IGraphics::CTextureHandle m_ComposedPreviewTexture;
-		int m_ComposedPreviewWidth = 0;
-		int m_ComposedPreviewHeight = 0;
-		std::vector<SAssetsEditorAssetEntry> m_avAssets[ASSETS_EDITOR_TYPE_COUNT];
-		std::vector<SAssetsEditorPartSlot> m_vPartSlots;
-		int m_ContextMenuSlotIndex = -1;
-		int m_ColorEditSlotIndex = -1;
-	};
-
-	SAssetsEditorState m_AssetsEditorState;
-	void RenderAssetsEditorScreen(CUIRect MainView);
-	void AssetsEditorClearAssets();
-	void AssetsEditorReloadAssets(int OnlyType = -1);
-	void AssetsEditorReloadAssetsImagesOnly();
-	void AssetsEditorResetPartSlots();
-	void AssetsEditorEnsureDefaultExportNames();
-	void AssetsEditorSyncExportNameFromType();
-	void AssetsEditorCommitExportNameForType();
-	void AssetsEditorValidateRequiredSlotsForType(int Type);
-	bool AssetsEditorComposeImage(CImageInfo &OutputImage);
-	bool AssetsEditorExport();
-	void AssetsEditorRenderCanvas(const CUIRect &Rect, IGraphics::CTextureHandle Texture, int W, int H, int Type, bool ShowGrid, int HighlightSlot);
-	void AssetsEditorCollectHoveredCandidates(const CUIRect &Rect, int Type, const std::vector<SAssetsEditorPartSlot> &vSlots, vec2 Mouse, std::vector<int> &vOutCandidates) const;
-	int AssetsEditorResolveHoveredSlotWithCycle(const CUIRect &Rect, int Type, const std::vector<SAssetsEditorPartSlot> &vSlots, vec2 Mouse, bool ClickedLmb, int PreferredSlotIndex);
-	void AssetsEditorCancelDrag();
-	void AssetsEditorApplyDrop(int TargetSlotIndex, const char *pDonorName, int SourceSlotIndex, bool ApplyAllSameSize);
-	void AssetsEditorUpdatePreviewIfDirty();
-	void AssetsEditorRequestClose();
-	void AssetsEditorCloseNow();
-	void AssetsEditorRenderExitConfirm(const CUIRect &Rect);
-	void AssetsEditorBuildFamilyKey(int Type, const CDataSprite *pSprite, char *pOut, int OutSize);
-	bool AssetsEditorCopyRectScaledNearest(CImageInfo &Dst, const CImageInfo &Src, int DstX, int DstY, int DstW, int DstH, int SrcX, int SrcY, int SrcW, int SrcH);
-	void AssetsEditorColorizeRect(CImageInfo &Image, int X, int Y, int W, int H, const SAssetsEditorPartSlot &Slot) const;
-	void AssetsEditorOpenColorPopup(int SlotIndex, float X, float Y);
-	void AssetsEditorClearSlotCustomColor(int SlotIndex);
-	static CUi::EPopupMenuFunctionResult AssetsEditorPopupColorEditor(void *pContext, CUIRect View, bool Active);
-
-	// found in menus_tclient.cpp
+	// TClient: found in menus_tclient.cpp
 	void RenderSettingsTClient(CUIRect MainView);
 	void RenderSettingsTClientSettings(CUIRect MainView);
 	void RenderSettingsTClientBindWheel(CUIRect MainView);
@@ -1088,15 +991,164 @@ private:
 	void RenderSettingsTClientConfigs(CUIRect MainView);
 	void RenderTeeCute(const CAnimState *pAnim, const CTeeRenderInfo *pInfo, int Emote, vec2 Dir, vec2 Pos, bool CuteEyes, float Alpha = 1.0f);
 
+	// TClient
 	const CWarType *m_pRemoveWarType = nullptr;
 	void PopupConfirmRemoveWarType();
 	void RenderDevSkin(vec2 RenderPos, float Size, const char *pSkinName, const char *pBackupSkin, bool CustomColors, int FeetColor, int BodyColor, int Emote, bool Rainbow, bool Cute,
 		ColorRGBA ColorFeet = ColorRGBA(0, 0, 0, 0), ColorRGBA ColorBody = ColorRGBA(0, 0, 0, 0));
 	void RenderFontIcon(CUIRect Rect, const char *pText, float Size, int Align);
 	int DoButtonNoRect_FontIcon(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, int Corners = IGraphics::CORNER_ALL);
-
-	ColorHSLA RenderHSLColorPicker(const CUIRect *pRect, unsigned int *pColor, bool Alpha);
-	bool RenderHslaScrollbars(CUIRect *pRect, unsigned int *pColor, bool Alpha, float DarkestLight);
 	int DoButtonLineSize_Menu(CButtonContainer *pButtonContainer, const char *pText, int Checked, const CUIRect *pRect, float ButtonLineSize, bool Fake = false, const char *pImageName = nullptr, int Corners = IGraphics::CORNER_ALL, float Rounding = 5.0f, float FontFactor = 0.0f, ColorRGBA Color = ColorRGBA(1.0f, 1.0f, 1.0f, 0.5f));
+
+	// found in components/bestclient/menus_bestclient.cpp // bestclient
+	void RenderSettingsBestClient(CUIRect MainView);
+	void RenderSettingsBestClientVisuals(CUIRect MainView);
+	void RenderSettingsBestClientGameplay(CUIRect MainView);
+	void RenderSettingsBestClientOthers(CUIRect MainView);
+	// bestclient
+	void RenderSettingsBestClientFun(CUIRect MainView);
+	// bestclient
+	void RenderSettingsBestClientInfo(CUIRect MainView); // bestclient
+	void RenderSettingsBestClientChatMediaBlock(CUIRect &Column); // bestclient
+	void RenderPopupStylePicker(CUIRect Box); // bestclient
+	void FinishWelcomeToStylePicker(); // bestclient
+	// bestclient
+	void OpenBestClientFun();
+	// bestclient
+	float m_MenuTabAlpha = 1.0f;
+	enum
+	{
+		ASSETS_EDITOR_CAT_ENTITIES = 0,
+		ASSETS_EDITOR_CAT_GAME,
+		ASSETS_EDITOR_CAT_EMOTICONS,
+		ASSETS_EDITOR_CAT_PARTICLES,
+		ASSETS_EDITOR_CAT_HUD,
+		ASSETS_EDITOR_CAT_EXTRAS,
+		ASSETS_EDITOR_CAT_CURSOR,
+		ASSETS_EDITOR_CAT_ARROW,
+		ASSETS_EDITOR_CAT_COUNT,
+	};
+
+	enum
+	{
+		ASSETS_EDITOR_SIDE_LEFT = 0,
+		ASSETS_EDITOR_SIDE_RIGHT,
+	};
+
+	enum
+	{
+		ASSETS_EDITOR_COLOR_BLEND_TEELIKE = 0,
+		ASSETS_EDITOR_COLOR_BLEND_SCREEN,
+		ASSETS_EDITOR_COLOR_BLEND_MULTIPLY,
+		ASSETS_EDITOR_COLOR_BLEND_OVERLAY,
+		ASSETS_EDITOR_COLOR_BLEND_COUNT,
+	};
+
+	struct SAssetsEditorImage
+	{
+		int m_Category = ASSETS_EDITOR_CAT_GAME;
+		char m_aName[64] = {};
+		char m_aPath[IO_MAX_PATH_LENGTH] = {};
+		IGraphics::CTextureHandle m_Texture;
+		CImageInfo m_Image;
+		int m_Width = 0;
+		int m_Height = 0;
+	};
+
+	struct SAssetsEditorPartSlot
+	{
+		int m_SpriteId = -1;
+		int m_DstX = 0;
+		int m_DstY = 0;
+		int m_DstW = 0;
+		int m_DstH = 0;
+		int m_SrcX = 0;
+		int m_SrcY = 0;
+		int m_SrcW = 0;
+		int m_SrcH = 0;
+		char m_aFamilyKey[64] = {};
+		bool m_FromDonor = false;
+		bool m_UseCustomColor = false;
+		unsigned m_CustomColor = 65408;
+		int m_ColorBlendMode = ASSETS_EDITOR_COLOR_BLEND_TEELIKE;
+		int m_ColorOpacity = 100;
+	};
+
+	struct SAssetsEditorHoverCycle
+	{
+		int m_PositionX = -1;
+		int m_PositionY = -1;
+		int m_Cursor = 0;
+		std::vector<int> m_vCandidates;
+	};
+
+	struct SAssetsEditorState
+	{
+		bool m_Open = false;
+		bool m_Initialized = false;
+		int m_ExploreSide = -1;
+		bool m_DragActive = false;
+		int m_DraggedDonorSlot = -1;
+		bool m_DirtyPreview = true;
+		bool m_HasUnsavedChanges = false;
+		bool m_ShowExitConfirm = false;
+		char m_aExportName[64] = {};
+		char m_aStatusMessage[256] = {};
+		bool m_StatusIsError = false;
+		IGraphics::CTextureHandle m_PreviewTexture;
+		int m_PreviewWidth = 0;
+		int m_PreviewHeight = 0;
+		int m_ColorEditSlot = -1;
+		bool m_HasLastColor = false;
+		unsigned m_LastCustomColor = 65408;
+		int m_LastColorBlendMode = ASSETS_EDITOR_COLOR_BLEND_TEELIKE;
+		int m_LastColorOpacity = 100;
+		bool m_HasLastColorPopupPos = false;
+		float m_LastColorPopupX = 0.0f;
+		float m_LastColorPopupY = 0.0f;
+		SAssetsEditorImage m_Left;
+		SAssetsEditorImage m_Right;
+		std::vector<SAssetsEditorPartSlot> m_vDonorSlots;
+		std::vector<SAssetsEditorPartSlot> m_vTargetSlots;
+		SAssetsEditorHoverCycle m_DonorHover;
+		SAssetsEditorHoverCycle m_TargetHover;
+	};
+
+	SAssetsEditorState m_AssetsEditorState;
+	void RenderAssetsEditorScreen(CUIRect MainView);
+	bool AssetsEditorAssignPickedAsset(int Side, int Category, const char *pName);
+	bool AssetsEditorResolvePath(int Category, const char *pName, char *pOut, int OutSize) const;
+	bool AssetsEditorLoadImage(int Category, const char *pName, SAssetsEditorImage &Out);
+	void AssetsEditorRebuildSlots(int Side);
+	bool AssetsEditorComposeImage(CImageInfo &OutputImage);
+	bool AssetsEditorExport();
+	void AssetsEditorUpdatePreview();
+	void AssetsEditorRenderCanvas(const CUIRect &Rect, IGraphics::CTextureHandle Texture, int Width, int Height, int Category, const std::vector<SAssetsEditorPartSlot> &vSlots, int HighlightSlot, bool DropHighlight);
+	void AssetsEditorCollectHovered(const CUIRect &Rect, int Category, const std::vector<SAssetsEditorPartSlot> &vSlots, vec2 Mouse, std::vector<int> &vOut) const;
+	int AssetsEditorResolveHovered(const CUIRect &Rect, int Category, const std::vector<SAssetsEditorPartSlot> &vSlots, vec2 Mouse, bool ClickedLmb, SAssetsEditorHoverCycle &Cycle, const SAssetsEditorPartSlot *pPreferred);
+	void AssetsEditorCancelDrag();
+	void AssetsEditorRequestClose();
+	void AssetsEditorCloseNow();
+	void AssetsEditorRenderExitConfirm(const CUIRect &Rect);
+	void AssetsEditorApplyDrop(int TargetSlotIndex, int DonorSlotIndex);
+	void AssetsEditorResetSlot(int SlotIndex);
+	bool AssetsEditorCopyScaled(CImageInfo &Dst, const CImageInfo &Src, int DstX, int DstY, int DstW, int DstH, int SrcX, int SrcY, int SrcW, int SrcH) const;
+	void AssetsEditorColorize(CImageInfo &Image, int X, int Y, int W, int H, const SAssetsEditorPartSlot &Slot) const;
+	void AssetsEditorOpenColorPopup(int SlotIndex, float X, float Y);
+	void AssetsEditorClearSlotColor(int SlotIndex);
+	static CUi::EPopupMenuFunctionResult AssetsEditorPopupColorEditor(void *pContext, CUIRect View, bool Active);
+	// bestclient
+public:
+	void CloseBestClientFun();
+	void SetBestClientSettingsTab(int Tab);
+	int GetBestClientSettingsTab() const;
+	void SetTClientSettingsTab(int Tab);
+	int GetTClientSettingsTab() const;
+	void RenderSettingsNavNewStyle(CUIRect &TabBar);
+	void RenderSettingsPage(CUIRect MainView);
+	void RenderSettingsPageAt(CUIRect MainView, int SettingsPage, int TClientTab, int BestClientTab);
+	void RenderSettingsContentNewStyle(CUIRect MainView);
+	void RenderSettingsContentLegacyStyle(CUIRect MainView);
+	// bestclient
 };
 #endif

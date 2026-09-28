@@ -25,6 +25,7 @@ class CConsoleLogger;
 class CGameConsole : public CComponent
 {
 	friend class CConsoleLogger;
+	friend class CConsoleScroll; // bestclient
 	class CInstance
 	{
 	public:
@@ -59,8 +60,10 @@ class CGameConsole : public CComponent
 		int m_CurSelEnd = 0;
 		bool m_HasSelection = false;
 		int m_NewLineCounter = 0;
+		// bestclient
 		bool m_ScrollbarDragging = false;
 		float m_ScrollbarDragOffset = 0.0f;
+		// bestclient
 
 		CGameConsole *m_pGameConsole;
 
@@ -119,8 +122,6 @@ class CGameConsole : public CComponent
 		void PrintLine(const char *pLine, int Len, ColorRGBA PrintColor) REQUIRES(!m_BacklogPendingLock);
 		int GetLinesToScroll(int Direction, int LinesToScroll);
 		void ScrollToCenter(int StartLine, int EndLine);
-		int TotalBacklogLines();
-		float LogLineWidth() const;
 		void Dump() REQUIRES(!m_BacklogPendingLock);
 
 		const char *GetString() const { return m_Input.GetString(); }
@@ -137,8 +138,6 @@ class CGameConsole : public CComponent
 		 * @param aCmd the command the cursor is at
 		 */
 		void GetCommand(const char *pInput, char (&aCmd)[IConsole::CMDLINE_LENGTH]);
-		static void PossibleCommandsCompleteCallback(int Index, const char *pStr, void *pUser);
-		static void PossibleArgumentsCompleteCallback(int Index, const char *pStr, void *pUser);
 
 		void UpdateEntryTextAttributes(CBacklogEntry *pEntry) const;
 
@@ -166,10 +165,14 @@ class CGameConsole : public CComponent
 	int m_ConsoleState;
 	float m_StateChangeEnd;
 	float m_StateChangeDuration;
-	float m_IgnoreAndroidEscapeUntil = 0.0f;
 
 	bool m_WantsSelectionCopy = false;
 	CUi::CTouchState m_TouchState;
+
+	vec2 m_ButtonPressPosition = vec2(0.0f, 0.0f);
+	bool m_ButtonPressed = false;
+
+	bool DoButton(const CUIRect &Rect, const char *pIcon, vec2 MousePosition, bool Released);
 
 	static constexpr ColorRGBA ms_SearchHighlightColor = ColorRGBA(1.0f, 0.0f, 0.0f, 1.0f);
 	static constexpr ColorRGBA ms_SearchSelectedColor = ColorRGBA(1.0f, 1.0f, 0.0f, 1.0f);
@@ -203,7 +206,11 @@ public:
 
 	void PrintLine(int Type, const char *pLine);
 	void RequireUsername(bool UsernameReq);
+	// bestclient
 	bool RconUsernameRequired() const { return m_RemoteConsole.m_UsernameReq; }
+	CGameClient *BcGameClient() { return GameClient(); }
+	const CGameClient *BcGameClient() const { return GameClient(); }
+	// bestclient
 
 	void OnStateChange(int NewState, int OldState) override;
 	void OnConsoleInit() override;

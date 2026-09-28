@@ -14,8 +14,10 @@
 
 #include <generated/client_data.h>
 
-#include <game/client/gameclient.h>
+// bestclient
 #include <game/client/components/bestclient/version.h>
+// bestclient
+#include <game/client/gameclient.h>
 #include <game/client/ui.h>
 #include <game/localization.h>
 #include <game/version.h>
@@ -44,7 +46,6 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 		TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
 	};
 
-	// Left panel: Discord, Telegram, Check update
 	CUIRect ExtMenu;
 	MainView.VSplitLeft(30.0f, nullptr, &ExtMenu);
 	ExtMenu.VSplitLeft(100.0f, &ExtMenu, nullptr);
@@ -64,21 +65,18 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 	ExtMenu.HSplitBottom(5.0f, &ExtMenu, nullptr);
 	ExtMenu.HSplitBottom(20.0f, &ExtMenu, &Button);
 	static CButtonContainer s_CheckUpdateButton;
-	if(GameClient()->m_Menus.DoButton_Menu(&s_CheckUpdateButton, Localize("Check update"), 0, &Button, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.0f, ColorRGBA(0.0f, 0.0f, 0.0f, 0.25f)))
+	if(GameClient()->m_Menus.DoButton_Menu(&s_CheckUpdateButton, BcLocalize("Check update"), 0, &Button, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_ALL, 5.0f, 0.0f, ColorRGBA(0.0f, 0.0f, 0.0f, 0.25f))) // bestclient
 	{
 #if defined(CONF_AUTOUPDATE)
 		Updater()->CheckForUpdate();
 #endif
 	}
 
-	// Center block: logo + 5 buttons, vertically centered
 	constexpr float LogoW = 360.0f;
 	constexpr float LogoH = 103.0f;
 	constexpr float LogoGap = 30.0f;
 	constexpr float ButtonH = 40.0f;
 	constexpr float ButtonGap = 5.0f;
-	constexpr float ClansBtnH = 22.0f;
-	constexpr float ClansBtnW = 100.0f;
 	constexpr int MenuButtonCount = 5;
 	const float ButtonsH = MenuButtonCount * ButtonH + (MenuButtonCount - 1) * ButtonGap;
 	const float TotalBlockH = LogoH + LogoGap + ButtonsH;
@@ -88,9 +86,8 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 
 	const float BlockStartY = MainView.y + (MainView.h - TotalBlockH) / 2.0f - 50.0f;
 
-	// Logo
 	{
-		const float LogoX = MainView.w / 2.0f - LogoW / 2.0f;
+		const float LogoX = MainView.x + MainView.w / 2.0f - LogoW / 2.0f;
 		const IGraphics::CTextureHandle &LogoTexture = GameClient()->m_Menus.BcLogoTexture();
 		Graphics()->TextureSet(LogoTexture.IsValid() && !LogoTexture.IsNullTexture() ? LogoTexture : g_pData->m_aImages[IMAGE_BANNER].m_Id);
 		Graphics()->QuadsBegin();
@@ -109,7 +106,6 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 		return Out;
 	};
 
-	// Build button rects top-down
 	CUIRect aMenuButtons[MenuButtonCount];
 	{
 		float Y = BlockStartY + LogoH + LogoGap;
@@ -120,15 +116,6 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 		}
 	}
 
-	// Small Clans button — right-aligned under Settings
-	CUIRect ClansButtonRect = {
-		aMenuButtons[4].x + aMenuButtons[4].w - ClansBtnW,
-		aMenuButtons[4].y + aMenuButtons[4].h + ButtonGap,
-		ClansBtnW,
-		ClansBtnH};
-	static float s_ClansButtonScale = 1.0f;
-
-	// Hover scale animation
 	static float s_aMenuButtonScale[MenuButtonCount] = {};
 	static bool s_MenuButtonScaleInit = false;
 	if(!s_MenuButtonScaleInit)
@@ -141,34 +128,23 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 	{
 		const bool AnimEnabled = g_Config.m_BcMainMenuAnimation != 0;
 		int HoveredIndex = -1;
-		bool ClansHovered = false;
 		if(AnimEnabled)
 		{
-			const CUIRect ScaledClans = ScaleButtonRect(ClansButtonRect, s_ClansButtonScale);
-			if(Ui()->MouseHovered(&ScaledClans))
-				ClansHovered = true;
-			else
+			for(int i = 0; i < MenuButtonCount; ++i)
 			{
-				for(int i = 0; i < MenuButtonCount; ++i)
+				const CUIRect Scaled = ScaleButtonRect(aMenuButtons[i], s_aMenuButtonScale[i]);
+				if(Ui()->MouseHovered(&Scaled))
 				{
-					const CUIRect Scaled = ScaleButtonRect(aMenuButtons[i], s_aMenuButtonScale[i]);
-					if(Ui()->MouseHovered(&Scaled))
-					{
-						HoveredIndex = i;
-						break;
-					}
+					HoveredIndex = i;
+					break;
 				}
 			}
 		}
-		const bool AnyHovered = ClansHovered || HoveredIndex != -1;
+		const bool AnyHovered = HoveredIndex != -1;
 		const float HoverScale = 1.08f;
 		const float OtherScale = 0.94f;
 		const float Speed = (float)g_Config.m_BcMainMenuAnimationSpeed;
 		const float Blend = AnimEnabled ? std::clamp(Client()->RenderFrameTime() * Speed, 0.0f, 1.0f) : 1.0f;
-		{
-			const float Target = (AnimEnabled && AnyHovered) ? (ClansHovered ? HoverScale : OtherScale) : 1.0f;
-			s_ClansButtonScale += (Target - s_ClansButtonScale) * Blend;
-		}
 		for(int i = 0; i < MenuButtonCount; ++i)
 		{
 			const float Target = (AnimEnabled && AnyHovered) ? (i == HoveredIndex ? HoverScale : OtherScale) : 1.0f;
@@ -176,7 +152,6 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 		}
 	}
 
-	// Play
 	{
 		CUIRect ScaledButton = ScaleButtonRect(aMenuButtons[0], s_aMenuButtonScale[0]);
 		static CButtonContainer s_PlayButton;
@@ -184,7 +159,6 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 			NewPage = g_Config.m_UiPage >= CMenus::PAGE_INTERNET && g_Config.m_UiPage <= CMenus::PAGE_FAVORITE_COMMUNITY_5 ? g_Config.m_UiPage : CMenus::PAGE_INTERNET;
 	}
 
-	// Demos
 	{
 		CUIRect ScaledButton = ScaleButtonRect(aMenuButtons[1], s_aMenuButtonScale[1]);
 		static CButtonContainer s_DemoButton;
@@ -192,7 +166,6 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 			NewPage = CMenus::PAGE_DEMOS;
 	}
 
-	// Editor
 	{
 		CUIRect ScaledButton = ScaleButtonRect(aMenuButtons[2], s_aMenuButtonScale[2]);
 		static CButtonContainer s_MapEditorButton;
@@ -201,22 +174,8 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 			g_Config.m_ClEditor = 1;
 			Input()->MouseModeRelative();
 		}
-
-		// "MULTIMAPPING" badge in the editor button's top-left corner
-		{
-			CUIRect Badge = ScaledButton;
-			Badge.VSplitLeft(90.0f, &Badge, nullptr);
-			Badge.HSplitTop(16.0f, &Badge, nullptr);
-			Badge.Margin(3.0f, &Badge);
-			Graphics()->DrawRect4(Badge.x, Badge.y, Badge.w, Badge.h,
-				ColorRGBA(0.62f, 0.28f, 0.95f, 1.0f), ColorRGBA(0.42f, 0.10f, 0.78f, 1.0f),
-				ColorRGBA(0.62f, 0.28f, 0.95f, 1.0f), ColorRGBA(0.42f, 0.10f, 0.78f, 1.0f),
-				IGraphics::CORNER_ALL, 4.0f);
-			Ui()->DoLabel(&Badge, "MULTIMAPPING", 8.0f, TEXTALIGN_MC);
-		}
 	}
 
-	// Run server
 	{
 		CUIRect ScaledButton = ScaleButtonRect(aMenuButtons[3], s_aMenuButtonScale[3]);
 		static CButtonContainer s_LocalServerButton;
@@ -230,29 +189,12 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 		}
 	}
 
-	// Settings
 	const CUIRect SettingsButton = aMenuButtons[4];
 	{
 		CUIRect ScaledButton = ScaleButtonRect(aMenuButtons[4], s_aMenuButtonScale[4]);
 		static CButtonContainer s_SettingsButton;
 		if(GameClient()->m_Menus.DoButton_MenuEx(&s_SettingsButton, Localize("Settings"), 0, &ScaledButton, BUTTONFLAG_LEFT, g_Config.m_ClShowStartMenuImages ? "settings" : nullptr, IGraphics::CORNER_ALL, Rounding, 0.5f, ColorRGBA(0.0f, 0.0f, 0.0f, 0.25f), true) || CheckHotKey(KEY_S))
 			NewPage = CMenus::PAGE_SETTINGS;
-	}
-
-	// Clans — small button under Settings, right-aligned
-	{
-		CUIRect ScaledButton = ScaleButtonRect(ClansButtonRect, s_ClansButtonScale);
-		static CButtonContainer s_ClansButton;
-		ColorRGBA BgColor(0.0f, 0.0f, 0.0f, 0.25f);
-		BgColor.a *= Ui()->ButtonColorMul(&s_ClansButton);
-		ScaledButton.Draw(BgColor, IGraphics::CORNER_ALL, 5.0f);
-
-		CUIRect Label = ScaledButton;
-		Label.HMargin(2.0f, &Label);
-		Ui()->DoLabel(&Label, Localize("Clans"), Label.h * CUi::ms_FontmodHeight, TEXTALIGN_MC);
-
-		if(Ui()->DoButtonLogic(&s_ClansButton, 0, &ScaledButton, BUTTONFLAG_LEFT) || CheckHotKey(KEY_C))
-			NewPage = CMenus::PAGE_CLANS;
 	}
 
 #if defined(CONF_AUTOUPDATE)
@@ -268,7 +210,7 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 		if(ShowDownloadButton || ShowRetryButton || ShowRestartButton || ShowUpdateProgress)
 		{
 			CUIRect UpdateRow = SettingsButton;
-			UpdateRow.y += SettingsButton.h + ButtonGap + ClansBtnH + ButtonGap;
+			UpdateRow.y += SettingsButton.h + ButtonGap;
 			UpdateRow.h = 22.0f;
 
 			CUIRect UpdateLabel, UpdateButton;
@@ -326,7 +268,6 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 	}
 #endif
 
-	// Quit вЂ” square icon button at bottom center
 	{
 		CUIRect QuitArea;
 		MainView.VMargin(VMargin, &QuitArea);
@@ -349,7 +290,6 @@ void CMenusStart::RenderStartMenu(CUIRect MainView)
 		ResetIconMode();
 	}
 
-	// Version labels + console button (bottom right)
 	{
 		CUIRect CurVersion, ConsoleButton;
 		MainView.HSplitBottom(74.0f, nullptr, &CurVersion);

@@ -26,7 +26,7 @@
 
 void CMenus::RenderSettingsTee7(CUIRect MainView)
 {
-	CUIRect SkinPreview, NormalSkinPreview, RedTeamSkinPreview, BlueTeamSkinPreview, Buttons, QuickSearch, DirectoryButton, RefreshButton, SaveDeleteButton, TabBars, TabBar, LeftTab, RightTab, InfoRow;
+	CUIRect SkinPreview, NormalSkinPreview, RedTeamSkinPreview, BlueTeamSkinPreview, Buttons, QuickSearch, DirectoryButton, RefreshButton, SaveDeleteButton, TabBars, TabBar, LeftTab, RightTab, InfoRow; // bestclient
 	MainView.HSplitBottom(20.0f, &MainView, &Buttons);
 	MainView.HSplitBottom(5.0f, &MainView, nullptr);
 	Buttons.VSplitRight(25.0f, &Buttons, &RefreshButton);
@@ -35,7 +35,7 @@ void CMenus::RenderSettingsTee7(CUIRect MainView)
 	Buttons.VSplitLeft(220.0f, &QuickSearch, &Buttons);
 	Buttons.VSplitLeft(10.0f, nullptr, &Buttons);
 	Buttons.VSplitLeft(120.0f, &SaveDeleteButton, &Buttons);
-	MainView.HSplitTop(78.0f, &TabBars, &MainView);
+	MainView.HSplitTop(78.0f, &TabBars, &MainView); // bestclient
 	MainView.HSplitTop(10.0f, nullptr, &MainView);
 	TabBars.VSplitMid(&TabBars, &SkinPreview, 20.0f);
 
@@ -67,29 +67,7 @@ void CMenus::RenderSettingsTee7(CUIRect MainView)
 	TabBars.HSplitTop(20.0f, &TabBar, &TabBars);
 	TabBar.VSplitMid(&LeftTab, &RightTab);
 
-	static CButtonContainer s_BasicTabButton;
-	if(DoButton_MenuTab(&s_BasicTabButton, Localize("Basic"), !m_CustomSkinMenu, &LeftTab, IGraphics::CORNER_L, nullptr, nullptr, nullptr, nullptr, 4.0f))
-	{
-		m_CustomSkinMenu = false;
-	}
-
-	static CButtonContainer s_CustomTabButton;
-	if(DoButton_MenuTab(&s_CustomTabButton, Localize("Custom"), m_CustomSkinMenu, &RightTab, IGraphics::CORNER_R, nullptr, nullptr, nullptr, nullptr, 4.0f))
-	{
-		m_CustomSkinMenu = true;
-		if(m_CustomSkinMenu && m_pSelectedSkin)
-		{
-			if(m_pSelectedSkin->m_Flags & CSkins7::SKINFLAG_STANDARD)
-			{
-				m_SkinNameInput.Set("copy_");
-				m_SkinNameInput.Append(m_pSelectedSkin->m_aName);
-			}
-			else
-				m_SkinNameInput.Set(m_pSelectedSkin->m_aName);
-		}
-	}
-
-	TabBars.HSplitTop(8.0f, nullptr, &TabBars);
+	TabBars.HSplitTop(8.0f, nullptr, &TabBars); // bestclient
 	TabBars.HSplitTop(20.0f, &InfoRow, &TabBars);
 
 	int *pCountry;
@@ -119,20 +97,10 @@ void CMenus::RenderSettingsTee7(CUIRect MainView)
 
 	Ui()->DoLabel(&NameLabel, Localize("Name"), 14.0f, TEXTALIGN_ML);
 	Ui()->DoLabel(&ClanLabel, Localize("Clan"), 14.0f, TEXTALIGN_ML);
-
 	if(Ui()->DoEditBox(&s_NameInput, &NameInput, 14.0f))
-	{
 		SetNeedSendInfo();
-	}
-
-	if(!m_Dummy && GameClient()->m_Clans.IsPlayerClanLocked())
-	{
-		Ui()->DoLabel(&ClanInput, g_Config.m_PlayerClan, 14.0f, TEXTALIGN_ML);
-	}
-	else if(Ui()->DoEditBox(&s_ClanInput, &ClanInput, 14.0f))
-	{
+	if(Ui()->DoEditBox(&s_ClanInput, &ClanInput, 14.0f))
 		SetNeedSendInfo();
-	}
 
 	static CButtonContainer s_FlagButton;
 	if(DoButton_Menu(&s_FlagButton, "", 0, &FlagButton))
@@ -146,12 +114,33 @@ void CMenus::RenderSettingsTee7(CUIRect MainView)
 		Ui()->DoPopupMenu(&s_PopupCountryId, FlagButton.x, FlagButton.y + FlagButton.h, 490.0f, 210.0f, &s_PopupCountryContext, PopupSettingsCountrySelection);
 	}
 	GameClient()->m_Tooltips.DoToolTip(&s_FlagButton, &FlagButton, Localize("Choose country flag"));
-
 	CUIRect FlagIcon = FlagButton;
-	const float OldWidth = FlagIcon.w;
+	const float OldFlagWidth = FlagIcon.w;
 	FlagIcon.w = FlagIcon.h * 2.0f;
-	FlagIcon.x += (OldWidth - FlagIcon.w) / 2.0f;
-	GameClient()->m_CountryFlags.Render(*pCountry, ColorRGBA(1.0f, 1.0f, 1.0f, Ui()->HotItem() == &s_FlagButton ? 1.0f : 0.85f), FlagIcon.x, FlagIcon.y, FlagIcon.w, FlagIcon.h);
+	FlagIcon.x += (OldFlagWidth - FlagIcon.w) / 2.0f;
+	GameClient()->m_CountryFlags.Render(*pCountry, ColorRGBA(1.0f, 1.0f, 1.0f, Ui()->HotItem() == &s_FlagButton ? 1.0f : 0.85f), FlagIcon.x, FlagIcon.y, FlagIcon.w, FlagIcon.h); // bestclient
+
+	static CButtonContainer s_BasicTabButton;
+	if(DoButton_MenuTab(&s_BasicTabButton, Localize("Basic"), !m_CustomSkinMenu, &LeftTab, IGraphics::CORNER_L, nullptr, nullptr, nullptr, nullptr, 4.0f))
+	{
+		m_CustomSkinMenu = false;
+	}
+
+	static CButtonContainer s_CustomTabButton;
+	if(DoButton_MenuTab(&s_CustomTabButton, Localize("Custom"), m_CustomSkinMenu, &RightTab, IGraphics::CORNER_R, nullptr, nullptr, nullptr, nullptr, 4.0f))
+	{
+		m_CustomSkinMenu = true;
+		if(m_CustomSkinMenu && m_pSelectedSkin)
+		{
+			if(m_pSelectedSkin->m_Flags & CSkins7::SKINFLAG_STANDARD)
+			{
+				m_SkinNameInput.Set("copy_");
+				m_SkinNameInput.Append(m_pSelectedSkin->m_aName);
+			}
+			else
+				m_SkinNameInput.Set(m_pSelectedSkin->m_aName);
+		}
+	}
 
 	// validate skin parts for solo mode
 	char aSkinParts[protocol7::NUM_SKINPARTS][protocol7::MAX_SKIN_ARRAY_SIZE];
@@ -293,6 +282,7 @@ void CMenus::PopupConfirmDeleteSkin7()
 		return;
 	}
 	m_pSelectedSkin = nullptr;
+	m_DeletedSkinIndex7 = m_SelectedSkinIndex7;
 }
 
 void CMenus::RenderSettingsTeeCustom7(CUIRect MainView)
@@ -381,18 +371,18 @@ void CMenus::RenderSkinSelection7(CUIRect MainView)
 	}
 
 	m_pSelectedSkin = nullptr;
-	int OldSelected = -1;
+	m_SelectedSkinIndex7 = -1;
 	for(int i = 0; i < (int)s_vpSkinList.size(); ++i)
 	{
 		const CSkins7::CSkin *pSkin = s_vpSkinList[i];
 		if(!str_comp(pSkin->m_aName, CSkins7::ms_apSkinNameVariables[m_Dummy]))
 		{
 			m_pSelectedSkin = pSkin;
-			OldSelected = i;
+			m_SelectedSkinIndex7 = i;
 			break;
 		}
 	}
-	s_ListBox.DoStart(50.0f, s_vpSkinList.size(), 4, 1, OldSelected, &MainView);
+	s_ListBox.DoStart(50.0f, s_vpSkinList.size(), 4, 1, m_SelectedSkinIndex7, &MainView);
 
 	for(const CSkins7::CSkin *pSkin : s_vpSkinList)
 	{
@@ -424,8 +414,14 @@ void CMenus::RenderSkinSelection7(CUIRect MainView)
 		Ui()->DoLabel(&Label, pSkin->m_aName, 12.0f, TEXTALIGN_ML, Props);
 	}
 
-	const int NewSelected = s_ListBox.DoEnd();
-	if(NewSelected != -1 && NewSelected != OldSelected)
+	int NewSelected = s_ListBox.DoEnd();
+	if(m_DeletedSkinIndex7 >= 0)
+	{
+		// Select the skin which took the place of the deleted skin, or the last skin
+		NewSelected = std::min(m_DeletedSkinIndex7, (int)s_vpSkinList.size() - 1);
+		m_DeletedSkinIndex7 = -1;
+	}
+	if(NewSelected != -1 && NewSelected != m_SelectedSkinIndex7)
 	{
 		s_LastSelectionTime = Client()->GlobalTime();
 		m_pSelectedSkin = s_vpSkinList[NewSelected];

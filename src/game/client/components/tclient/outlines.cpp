@@ -1,5 +1,7 @@
 #include "outlines.h"
 
+#include <base/dbg.h>
+
 #include <engine/graphics.h>
 #include <engine/shared/config.h>
 
@@ -52,11 +54,10 @@ void COutlines::OnRender()
 
 	const float Scale = 32.0f;
 
-	float ScreenX0, ScreenY0, ScreenX1, ScreenY1;
-	Graphics()->GetScreen(&ScreenX0, &ScreenY0, &ScreenX1, &ScreenY1);
-	const float PixelsPerUnit = Graphics()->ScreenWidth() / std::max(1.0f, ScreenX1 - ScreenX0);
+	CScreenRect ScreenRect = Graphics()->GetScreen();
+	const float PixelsPerUnit = Graphics()->ScreenWidth() / std::max(1.0f, ScreenRect.Width());
 
-	// Cull tile outlines outside optimizer FPS fog (same area as other non-map draws)
+	// bestclient
 	if(GameClient()->OptimizerFpsFogEnabled())
 	{
 		float HalfW = 0.0f;
@@ -65,19 +66,20 @@ void COutlines::OnRender()
 		if(HalfW > 0.0f && HalfH > 0.0f)
 		{
 			const vec2 Center = GameClient()->m_Camera.m_Center;
-			ScreenX0 = std::max(ScreenX0, Center.x - HalfW);
-			ScreenX1 = std::min(ScreenX1, Center.x + HalfW);
-			ScreenY0 = std::max(ScreenY0, Center.y - HalfH);
-			ScreenY1 = std::min(ScreenY1, Center.y + HalfH);
-			if(ScreenX0 >= ScreenX1 || ScreenY0 >= ScreenY1)
+			ScreenRect.m_TopLeft.x = std::max(ScreenRect.m_TopLeft.x, Center.x - HalfW);
+			ScreenRect.m_BottomRight.x = std::min(ScreenRect.m_BottomRight.x, Center.x + HalfW);
+			ScreenRect.m_TopLeft.y = std::max(ScreenRect.m_TopLeft.y, Center.y - HalfH);
+			ScreenRect.m_BottomRight.y = std::min(ScreenRect.m_BottomRight.y, Center.y + HalfH);
+			if(ScreenRect.m_TopLeft.x >= ScreenRect.m_BottomRight.x || ScreenRect.m_TopLeft.y >= ScreenRect.m_BottomRight.y)
 				return;
 		}
 	}
+	// bestclient
 
-	int StartY = (int)(ScreenY0 / Scale) - 1;
-	int StartX = (int)(ScreenX0 / Scale) - 1;
-	int EndY = (int)(ScreenY1 / Scale) + 1;
-	int EndX = (int)(ScreenX1 / Scale) + 1;
+	int StartX = (int)(ScreenRect.m_TopLeft.x / Scale) - 1;
+	int StartY = (int)(ScreenRect.m_TopLeft.y / Scale) - 1;
+	int EndX = (int)(ScreenRect.m_BottomRight.x / Scale) + 1;
+	int EndY = (int)(ScreenRect.m_BottomRight.y / Scale) + 1;
 	int MaxScale = 12;
 	if(g_Config.m_BcEntitiesRounding == 0 && (EndX - StartX > Graphics()->ScreenWidth() / MaxScale || EndY - StartY > Graphics()->ScreenHeight() / MaxScale))
 	{

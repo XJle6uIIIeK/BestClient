@@ -17,6 +17,9 @@ public:
 
 	std::string m_Name;
 	std::string m_Filename;
+	/**
+	 * Country code in ISO 3166-1 numeric.
+	 */
 	int m_CountryCode;
 	std::vector<std::string> m_vLanguageCodes;
 
@@ -39,6 +42,8 @@ class CLocalizationDatabase
 		}
 
 		bool operator<(const CString &Other) const { return m_Hash < Other.m_Hash || (m_Hash == Other.m_Hash && m_ContextHash < Other.m_ContextHash); }
+		bool operator<=(const CString &Other) const { return m_Hash < Other.m_Hash || (m_Hash == Other.m_Hash && m_ContextHash <= Other.m_ContextHash); }
+		bool operator==(const CString &Other) const { return m_Hash == Other.m_Hash && m_ContextHash == Other.m_ContextHash; }
 	};
 
 	std::vector<CLanguage> m_vLanguages;
@@ -61,5 +66,9 @@ extern CLocalizationDatabase g_Localization;
 [[gnu::format_arg(1)]] extern const char *Localize(const char *pStr, const char *pContext = "");
 
 [[gnu::format_arg(1)]] extern const char *TCLocalize(const char *pStr, const char *pContext = "");
+
+// bestclient
+[[gnu::format_arg(1)]] extern const char *BcLocalize(const char *pStr);
+// bestclient
 
 #endif

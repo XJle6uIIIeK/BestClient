@@ -1,14 +1,4 @@
-// Copyright © 2026 BestProject Team
-// BestClient Updater — standalone Linux GUI application (SDL2).
-// Mirrors src/tools/bestclient_updater.cpp (Windows) step-for-step. Receives
-// four positional arguments:
-//   argv[1]  PID of the client process to wait for
-//   argv[2]  Absolute path to the downloaded archive (.tar.xz)
-//   argv[3]  Install directory (directory containing the DDNet binary)
-//   argv[4]  Absolute path to the client executable to relaunch
-//
-// Only compiled on Linux (see CMakeLists.txt).
-
+/* Copyright © 2026 BestProject Team */
 #include "bestclient_updater_linux_font.h"
 #include "bestclient_updater_linux_fs.h"
 
@@ -26,8 +16,6 @@
 
 #include <string>
 
-// ─── Theme (matches src/tools/bestclient_updater.cpp) ───────────────────────
-
 static const int WND_W = 480;
 static const int WND_H = 215;
 
@@ -38,8 +26,6 @@ static const SDL_Color C_TITLE = {235, 245, 232, 255};
 static const SDL_Color C_DIM = {140, 155, 135, 255};
 static const SDL_Color C_BAR_BG = {40, 40, 40, 255};
 static const SDL_Color C_ERROR = {230, 75, 45, 255};
-
-// ─── Shared state ────────────────────────────────────────────────────────────
 
 static SDL_mutex *g_pLock = nullptr;
 static SDL_atomic_t g_Percent;
@@ -75,13 +61,9 @@ static void Fail(const char *pMsg)
 {
 	SDL_AtomicSet(&g_Failed, 1);
 	SetStatus(pMsg);
-	// Leave window open so the user can read the error; Esc closes it.
+
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-// Runs a process to completion without a shell (avoids shell-metacharacter
-// injection from paths) and returns its exit code, or -1 on spawn failure.
 static int RunProcessSync(const char *pFile, char *const apArgv[])
 {
 	const pid_t Child = fork();
@@ -100,17 +82,11 @@ static int RunProcessSync(const char *pFile, char *const apArgv[])
 	return -1;
 }
 
-// The PID we're given is our parent's parent (the client forked us and quit),
-// not a child of this process, so waitpid() cannot be used to wait for it.
 static bool ProcessGone(pid_t Pid)
 {
 	return kill(Pid, 0) == -1 && errno == ESRCH;
 }
 
-// ─── Worker ──────────────────────────────────────────────────────────────────
-
-// Directories to preserve across updates (user-placed assets), matching
-// src/tools/bestclient_updater.cpp's k_aUserDirs.
 static const char *k_apUserDirs[] = {
 	"data/assets/arrow",
 	"data/assets/arrows",
@@ -130,14 +106,14 @@ static int WorkerThreadFn(void *pData)
 {
 	auto *pArgs = static_cast<SWorkerArgs *>(pData);
 
-	// ── 1. Wait for the client to exit ────────────────────────────────────
+
 	SetStatus("Waiting for client to close...");
 	SetPercent(2);
 	while(!ProcessGone(pArgs->Pid))
 		usleep(200 * 1000);
 	SetPercent(8);
 
-	// ── 2. Prepare extraction directory ───────────────────────────────────
+
 	const std::string Extract = pArgs->InstallDir + "/update/extract";
 	BcFs::DeleteTree(Extract.c_str());
 	if(!BcFs::MakeDirRecursive(Extract))
@@ -147,7 +123,7 @@ static int WorkerThreadFn(void *pData)
 		return 1;
 	}
 
-	// ── 3. Extract archive ─────────────────────────────────────────────────
+
 	SetStatus("Extracting update...");
 	{
 		char *apArgv[] = {(char *)"tar", (char *)"-xf", (char *)pArgs->Archive.c_str(), (char *)"-C", (char *)Extract.c_str(), nullptr};
@@ -161,7 +137,7 @@ static int WorkerThreadFn(void *pData)
 	}
 	SetPercent(50);
 
-	// ── 4. Resolve copy root (archive may wrap files in a single subfolder) ──
+
 	std::string CopyRoot = Extract;
 	{
 		DIR *pDir = opendir(Extract.c_str());
@@ -189,7 +165,7 @@ static int WorkerThreadFn(void *pData)
 		}
 	}
 
-	// ── 5. Backup user asset directories ──────────────────────────────────
+
 	SetStatus("Backing up settings...");
 	const std::string Backup = pArgs->InstallDir + "/update/backup_" + std::to_string((long long)pArgs->Pid);
 	BcFs::DeleteTree(Backup.c_str());
@@ -202,7 +178,7 @@ static int WorkerThreadFn(void *pData)
 	}
 	SetPercent(55);
 
-	// ── 6. Copy new files into install directory ─────────────────────────────
+
 	SetStatus("Installing files...");
 	{
 		const int Total = BcFs::CountFiles(CopyRoot.c_str());
@@ -215,7 +191,7 @@ static int WorkerThreadFn(void *pData)
 	}
 	SetPercent(90);
 
-	// ── 7. Restore user assets ─────────────────────────────────────────────
+
 	SetStatus("Restoring settings...");
 	for(const char *pRel : k_apUserDirs)
 	{
@@ -226,14 +202,14 @@ static int WorkerThreadFn(void *pData)
 	}
 	SetPercent(95);
 
-	// ── 8. Clean up temp files ─────────────────────────────────────────────
+
 	SetStatus("Cleaning up...");
 	unlink(pArgs->Archive.c_str());
 	BcFs::DeleteTree(Extract.c_str());
 	BcFs::DeleteTree(Backup.c_str());
 	SetPercent(100);
 
-	// ── 9. Launch client ───────────────────────────────────────────────────
+
 	SetStatus("Launching BestClient...");
 	usleep(500 * 1000);
 
@@ -252,8 +228,6 @@ static int WorkerThreadFn(void *pData)
 	SDL_AtomicSet(&g_Done, 1);
 	return 0;
 }
-
-// ─── Rendering ────────────────────────────────────────────────────────────────
 
 static SDL_Color LerpColor(SDL_Color A, SDL_Color B, float T)
 {
@@ -338,8 +312,6 @@ static void Render(SDL_Renderer *pRenderer)
 
 	SDL_RenderPresent(pRenderer);
 }
-
-// ─── Entry point ──────────────────────────────────────────────────────────────
 
 int main(int argc, char **argv)
 {

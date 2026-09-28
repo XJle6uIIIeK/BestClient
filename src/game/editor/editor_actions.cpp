@@ -12,19 +12,6 @@
 #include <game/editor/mapitems/layer_sounds.h>
 #include <game/editor/mapitems/map.h>
 
-int GetLayerSubType(const std::shared_ptr<CLayer> &pLayer)
-{
-	if(pLayer->m_Type != LAYERTYPE_TILES)
-		return 0;
-	auto pTiles = std::static_pointer_cast<CLayerTiles>(pLayer);
-	if(pTiles->m_HasFront)   return 1;
-	if(pTiles->m_HasTele)    return 2;
-	if(pTiles->m_HasSpeedup) return 3;
-	if(pTiles->m_HasSwitch)  return 4;
-	if(pTiles->m_HasTune)    return 5;
-	return 0;
-}
-
 CEditorBrushDrawAction::CEditorBrushDrawAction(CEditorMap *pMap, int Group) :
 	IEditorAction(pMap), m_Group(Group)
 {
@@ -95,7 +82,6 @@ void CEditorBrushDrawAction::SetInfos()
 
 		if(pLayer->m_Type == LAYERTYPE_TILES)
 		{
-			std::shared_ptr<CLayerTiles> pLayerTiles = std::static_pointer_cast<CLayerTiles>(pLayer);
 			auto Changes = Pair.second;
 			for(auto &Change : Changes)
 			{
@@ -250,8 +236,6 @@ void CEditorBrushDrawAction::Apply(bool Undo)
 			Map()->m_pTuneLayer->m_pTiles[Index].m_Index = Data.m_Index;
 		}
 	}
-
-	Editor()->m_MultiMappingSession.NotifyFullSync();
 }
 
 // -------------------------------------------
@@ -266,11 +250,7 @@ void CEditorActionQuadPlace::Undo()
 {
 	std::shared_ptr<CLayerQuads> pLayerQuads = std::static_pointer_cast<CLayerQuads>(m_pLayer);
 	for(size_t k = 0; k < m_vBrush.size(); k++)
-	{
-		int QuadIdx = (int)pLayerQuads->m_vQuads.size() - 1;
-		Editor()->m_MultiMappingSession.NotifyDelQuad(m_GroupIndex, m_LayerIndex, QuadIdx);
 		pLayerQuads->m_vQuads.pop_back();
-	}
 
 	Map()->OnModify();
 }
@@ -278,11 +258,7 @@ void CEditorActionQuadPlace::Redo()
 {
 	std::shared_ptr<CLayerQuads> pLayerQuads = std::static_pointer_cast<CLayerQuads>(m_pLayer);
 	for(auto &Brush : m_vBrush)
-	{
 		pLayerQuads->m_vQuads.push_back(Brush);
-		int QuadIdx = (int)pLayerQuads->m_vQuads.size() - 1;
-		Editor()->m_MultiMappingSession.NotifyAddQuad(m_GroupIndex, m_LayerIndex, QuadIdx, Brush);
-	}
 
 	Map()->OnModify();
 }
@@ -297,11 +273,7 @@ void CEditorActionSoundPlace::Undo()
 {
 	std::shared_ptr<CLayerSounds> pLayerSounds = std::static_pointer_cast<CLayerSounds>(m_pLayer);
 	for(size_t k = 0; k < m_vBrush.size(); k++)
-	{
-		int SourceIdx = (int)pLayerSounds->m_vSources.size() - 1;
-		Editor()->m_MultiMappingSession.NotifyDelSoundSource(m_GroupIndex, m_LayerIndex, SourceIdx);
 		pLayerSounds->m_vSources.pop_back();
-	}
 
 	Map()->OnModify();
 }
@@ -310,51 +282,60 @@ void CEditorActionSoundPlace::Redo()
 {
 	std::shared_ptr<CLayerSounds> pLayerSounds = std::static_pointer_cast<CLayerSounds>(m_pLayer);
 	for(auto &Brush : m_vBrush)
-	{
 		pLayerSounds->m_vSources.push_back(Brush);
-		int SourceIdx = (int)pLayerSounds->m_vSources.size() - 1;
-		Editor()->m_MultiMappingSession.NotifyAddSoundSource(m_GroupIndex, m_LayerIndex, SourceIdx);
-	}
 
 	Map()->OnModify();
 }
 
 // ---------------------------------------------------------------------------------------
 
-CEditorActionDeleteQuad::CEditorActionDeleteQuad(CEditorMap *pMap, int GroupIndex, int LayerIndex, std::vector<int> const &vQuadsIndices, std::vector<CQuad> const &vDeletedQuads) :
-	CEditorActionLayerBase(pMap, GroupIndex, LayerIndex), m_vQuadsIndices(vQuadsIndices), m_vDeletedQuads(vDeletedQuads)
+CEditorActionDeleteQuad::CEditorActionDeleteQuad(CEditorMap *pMap, int GroupIndex, int LayerIndex) :
+	CEditorActionLayerBase(pMap, GroupIndex, LayerIndex)
 {
+	std::shared_ptr<CLayerQuads> pLayerQuads = std::static_pointer_cast<CLayerQuads>(m_pLayer);
+	m_vQuadsIndices = Map()->m_vSelectedQuads;
+
+	// make sure the indices are descending
+	std::sort(m_vQuadsIndices.begin(), m_vQuadsIndices.end(), std::greater<>());
+
+	dbg_assert(m_vQuadsIndices[0] < (int)pLayerQuads->m_vQuads.size(), "Tried to delete quad with Id %d, while the layer only contains %d quads", m_vQuadsIndices[0], (int)pLayerQuads->m_vQuads.size());
+	dbg_assert(m_vQuadsIndices.back() >= 0, "Tried to delete quad with negative Id %d", m_vQuadsIndices.back());
+
+	m_vDeletedQuads.reserve(Map()->m_vSelectedQuads.size());
+	for(int QuadId : m_vQuadsIndices)
+	{
+		m_vDeletedQuads.emplace_back(pLayerQuads->m_vQuads[QuadId]);
+	}
+
 	str_format(m_aDisplayText, sizeof(m_aDisplayText), "Delete quad (x%d)", (int)m_vDeletedQuads.size());
 }
 
 void CEditorActionDeleteQuad::Undo()
 {
 	std::shared_ptr<CLayerQuads> pLayerQuads = std::static_pointer_cast<CLayerQuads>(m_pLayer);
-	for(size_t k = 0; k < m_vQuadsIndices.size(); k++)
+
+	// Quad indices are in descending order, so we add them back in ascending order
+	for(int IndexId = (int)m_vQuadsIndices.size() - 1; IndexId >= 0; --IndexId)
 	{
-		pLayerQuads->m_vQuads.insert(pLayerQuads->m_vQuads.begin() + m_vQuadsIndices[k], m_vDeletedQuads[k]);
-		Editor()->m_MultiMappingSession.NotifyAddQuad(m_GroupIndex, m_LayerIndex, m_vQuadsIndices[k], m_vDeletedQuads[k]);
+		pLayerQuads->m_vQuads.insert(pLayerQuads->m_vQuads.begin() + m_vQuadsIndices[IndexId], m_vDeletedQuads[IndexId]);
 	}
+	Map()->m_vSelectedQuads = m_vQuadsIndices;
+
 	Map()->OnModify();
 }
 
 void CEditorActionDeleteQuad::Redo()
 {
 	std::shared_ptr<CLayerQuads> pLayerQuads = std::static_pointer_cast<CLayerQuads>(m_pLayer);
-	std::vector<int> vQuads(m_vQuadsIndices);
 
-	for(int i = 0; i < (int)vQuads.size(); ++i)
+	// Quad indices are in descending order
+	for(const int &QuadId : m_vQuadsIndices)
 	{
-		Editor()->m_MultiMappingSession.NotifyDelQuad(m_GroupIndex, m_LayerIndex, vQuads[i]);
-		pLayerQuads->m_vQuads.erase(pLayerQuads->m_vQuads.begin() + vQuads[i]);
-		for(int j = i + 1; j < (int)vQuads.size(); ++j)
-			if(vQuads[j] > vQuads[i])
-				vQuads[j]--;
-
-		vQuads.erase(vQuads.begin() + i);
-
-		i--;
+		pLayerQuads->m_vQuads.erase(pLayerQuads->m_vQuads.begin() + QuadId);
 	}
+	Map()->m_vSelectedQuads.clear();
+
+	Map()->OnModify();
 }
 
 // ---------------------------------------------------------------------------------------
@@ -381,7 +362,6 @@ void CEditorActionEditQuadPoint::Apply(const std::vector<CPoint> &vValue)
 	CQuad &Quad = pLayerQuads->m_vQuads[m_QuadIndex];
 	dbg_assert(std::size(Quad.m_aPoints) == vValue.size(), "Expected %d values, got %d", (int)std::size(Quad.m_aPoints), (int)vValue.size());
 	std::copy_n(vValue.begin(), std::size(Quad.m_aPoints), Quad.m_aPoints);
-	Editor()->m_MultiMappingSession.NotifyQuadPoints(m_GroupIndex, m_LayerIndex, m_QuadIndex, Quad.m_aPoints);
 }
 
 CEditorActionEditQuadColor::CEditorActionEditQuadColor(CEditorMap *pMap, int GroupIndex, int LayerIndex, int QuadIndex, std::vector<CColor> const &vPreviousColors, std::vector<CColor> const &vCurrentColors) :
@@ -406,7 +386,6 @@ void CEditorActionEditQuadColor::Apply(std::vector<CColor> &vValue)
 	CQuad &Quad = pLayerQuads->m_vQuads[m_QuadIndex];
 	dbg_assert(std::size(Quad.m_aColors) == vValue.size(), "Expected %d values, got %d", (int)std::size(Quad.m_aColors), (int)vValue.size());
 	std::copy_n(vValue.begin(), std::size(Quad.m_aColors), Quad.m_aColors);
-	Editor()->m_MultiMappingSession.NotifyQuadColors(m_GroupIndex, m_LayerIndex, m_QuadIndex, Quad.m_aColors);
 }
 
 CEditorActionEditQuadProp::CEditorActionEditQuadProp(CEditorMap *pMap, int GroupIndex, int LayerIndex, int QuadIndex, EQuadProp Prop, int Previous, int Current) :
@@ -448,7 +427,6 @@ void CEditorActionEditQuadProp::Apply(int Value)
 		Quad.m_ColorEnv = Value;
 	else if(m_Prop == EQuadProp::COLOR_ENV_OFFSET)
 		Quad.m_ColorEnvOffset = Value;
-	Editor()->m_MultiMappingSession.NotifyQuadProp(m_GroupIndex, m_LayerIndex, m_QuadIndex, (int)m_Prop, Value);
 }
 
 CEditorActionEditQuadPointProp::CEditorActionEditQuadPointProp(CEditorMap *pMap, int GroupIndex, int LayerIndex, int QuadIndex, int PointIndex, EQuadPointProp Prop, int Previous, int Current) :
@@ -500,7 +478,6 @@ void CEditorActionEditQuadPointProp::Apply(int Value)
 	{
 		Quad.m_aTexcoords[m_PointIndex].y = Value;
 	}
-	Editor()->m_MultiMappingSession.NotifyQuadPointProp(m_GroupIndex, m_LayerIndex, m_QuadIndex, m_PointIndex, (int)m_Prop, Value);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -586,7 +563,6 @@ void CEditorActionTileChanges::Apply(bool Undo)
 	}
 
 	Map()->OnModify();
-	Editor()->m_MultiMappingSession.NotifyFullSync();
 }
 
 void CEditorActionTileChanges::ComputeInfos()
@@ -638,7 +614,6 @@ void CEditorActionAddLayer::Undo()
 	if(m_LayerIndex >= (int)vLayers.size())
 		Map()->SelectLayer(vLayers.size() - 1, m_GroupIndex);
 
-	Editor()->m_MultiMappingSession.NotifyDelLayer(m_GroupIndex, m_LayerIndex);
 	Map()->OnModify();
 }
 
@@ -666,8 +641,6 @@ void CEditorActionAddLayer::Redo()
 
 	Map()->m_vpGroups[m_GroupIndex]->m_Collapse = false;
 	Map()->SelectLayer(m_LayerIndex, m_GroupIndex);
-	Editor()->m_MultiMappingSession.NotifyAddLayer(m_GroupIndex, m_LayerIndex, m_pLayer->m_Type, m_pLayer->m_aName, GetLayerSubType(m_pLayer));
-	Editor()->m_MultiMappingSession.SyncLayerContents(m_GroupIndex, m_LayerIndex);
 	Map()->OnModify();
 }
 
@@ -697,7 +670,6 @@ void CEditorActionDeleteLayer::Redo()
 			Map()->m_pTuneLayer = nullptr;
 	}
 
-	Editor()->m_MultiMappingSession.NotifyDelLayer(m_GroupIndex, m_LayerIndex);
 	Map()->m_vpGroups[m_GroupIndex]->DeleteLayer(m_LayerIndex);
 
 	Map()->m_vpGroups[m_GroupIndex]->m_Collapse = false;
@@ -731,8 +703,6 @@ void CEditorActionDeleteLayer::Undo()
 
 	Map()->m_vpGroups[m_GroupIndex]->m_Collapse = false;
 	Map()->SelectLayer(m_LayerIndex, m_GroupIndex);
-	Editor()->m_MultiMappingSession.NotifyAddLayer(m_GroupIndex, m_LayerIndex, m_pLayer->m_Type, m_pLayer->m_aName, GetLayerSubType(m_pLayer));
-	Editor()->m_MultiMappingSession.SyncLayerContents(m_GroupIndex, m_LayerIndex);
 	Map()->OnModify();
 }
 
@@ -743,7 +713,7 @@ CEditorActionGroup::CEditorActionGroup(CEditorMap *pMap, int GroupIndex, bool De
 	if(m_Delete)
 		str_format(m_aDisplayText, sizeof(m_aDisplayText), "Delete group %d", m_GroupIndex);
 	else
-		str_copy(m_aDisplayText, "New group", sizeof(m_aDisplayText));
+		str_copy(m_aDisplayText, "New group");
 }
 
 void CEditorActionGroup::Undo()
@@ -754,21 +724,12 @@ void CEditorActionGroup::Undo()
 		Map()->m_vpGroups.insert(Map()->m_vpGroups.begin() + m_GroupIndex, m_pGroup);
 		Map()->m_SelectedGroup = m_GroupIndex;
 		Map()->OnModify();
-		// Notify: recreate group and all its layers on the remote client
-		Editor()->m_MultiMappingSession.NotifyAddGroup(m_GroupIndex);
-		for(int l = 0; l < (int)m_pGroup->m_vpLayers.size(); l++)
-		{
-			auto &pLayer = m_pGroup->m_vpLayers[l];
-			Editor()->m_MultiMappingSession.NotifyAddLayer(m_GroupIndex, l, pLayer->m_Type, pLayer->m_aName, GetLayerSubType(pLayer));
-			Editor()->m_MultiMappingSession.SyncLayerContents(m_GroupIndex, l);
-		}
 	}
 	else
 	{
 		// Undo: delete the group
-		Editor()->m_MultiMappingSession.NotifyDelGroup(m_GroupIndex);
 		Map()->DeleteGroup(m_GroupIndex);
-		Map()->m_SelectedGroup = maximum(0, m_GroupIndex - 1);
+		Map()->m_SelectedGroup = std::max(0, m_GroupIndex - 1);
 	}
 
 	Map()->OnModify();
@@ -781,20 +742,12 @@ void CEditorActionGroup::Redo()
 		// Redo: add back the group
 		Map()->m_vpGroups.insert(Map()->m_vpGroups.begin() + m_GroupIndex, m_pGroup);
 		Map()->m_SelectedGroup = m_GroupIndex;
-		Editor()->m_MultiMappingSession.NotifyAddGroup(m_GroupIndex);
-		for(int l = 0; l < (int)m_pGroup->m_vpLayers.size(); l++)
-		{
-			auto &pLayer = m_pGroup->m_vpLayers[l];
-			Editor()->m_MultiMappingSession.NotifyAddLayer(m_GroupIndex, l, pLayer->m_Type, pLayer->m_aName, GetLayerSubType(pLayer));
-			Editor()->m_MultiMappingSession.SyncLayerContents(m_GroupIndex, l);
-		}
 	}
 	else
 	{
 		// Redo: delete the group
-		Editor()->m_MultiMappingSession.NotifyDelGroup(m_GroupIndex);
 		Map()->DeleteGroup(m_GroupIndex);
-		Map()->m_SelectedGroup = maximum(0, m_GroupIndex - 1);
+		Map()->m_SelectedGroup = std::max(0, m_GroupIndex - 1);
 	}
 
 	Map()->OnModify();
@@ -821,13 +774,9 @@ CEditorActionEditGroupProp::CEditorActionEditGroupProp(CEditorMap *pMap, int Gro
 
 void CEditorActionEditGroupProp::Undo()
 {
-	auto pGroup = Map()->m_vpGroups[m_GroupIndex];
-
 	if(m_Prop == EGroupProp::ORDER)
 	{
 		Map()->m_SelectedGroup = Map()->MoveGroup(m_Current, m_Previous);
-		// receiver does MoveGroup(GroupIdx, Value): GroupIdx = source index
-		Editor()->m_MultiMappingSession.NotifyGroupProp(m_Current, (int)EGroupProp::ORDER, m_Previous);
 	}
 	else
 		Apply(m_Previous);
@@ -835,12 +784,9 @@ void CEditorActionEditGroupProp::Undo()
 
 void CEditorActionEditGroupProp::Redo()
 {
-	auto pGroup = Map()->m_vpGroups[m_GroupIndex];
-
 	if(m_Prop == EGroupProp::ORDER)
 	{
 		Map()->m_SelectedGroup = Map()->MoveGroup(m_Previous, m_Current);
-		Editor()->m_MultiMappingSession.NotifyGroupProp(m_Previous, (int)EGroupProp::ORDER, m_Current);
 	}
 	else
 		Apply(m_Current);
@@ -870,7 +816,6 @@ void CEditorActionEditGroupProp::Apply(int Value)
 		pGroup->m_ClipH = Value;
 
 	Map()->OnModify();
-	Editor()->m_MultiMappingSession.NotifyGroupProp(m_GroupIndex, (int)m_Prop, Value);
 }
 
 template<typename E>
@@ -897,7 +842,6 @@ void CEditorActionEditLayerProp::Undo()
 
 	if(m_Prop == ELayerProp::ORDER)
 	{
-		Editor()->m_MultiMappingSession.NotifyLayerProp(m_GroupIndex, m_Current, (int)ELayerProp::ORDER, m_Previous);
 		Map()->SelectLayer(pCurrentGroup->MoveLayer(m_Current, m_Previous));
 	}
 	else
@@ -910,7 +854,6 @@ void CEditorActionEditLayerProp::Redo()
 
 	if(m_Prop == ELayerProp::ORDER)
 	{
-		Editor()->m_MultiMappingSession.NotifyLayerProp(m_GroupIndex, m_Previous, (int)ELayerProp::ORDER, m_Current);
 		Map()->SelectLayer(pCurrentGroup->MoveLayer(m_Previous, m_Current));
 	}
 	else
@@ -921,25 +864,13 @@ void CEditorActionEditLayerProp::Apply(int Value)
 {
 	if(m_Prop == ELayerProp::GROUP)
 	{
-		int SrcGroupIdx = (Value == m_Previous) ? m_Current : m_Previous;
-		auto pCurrentGroup = Map()->m_vpGroups[SrcGroupIdx];
+		auto pCurrentGroup = Map()->m_vpGroups[Value == m_Previous ? m_Current : m_Previous];
 		auto pPreviousGroup = Map()->m_vpGroups[Value];
-		int SrcLayerIdx = (int)pCurrentGroup->m_vpLayers.size() - 1;
-		Editor()->m_MultiMappingSession.NotifyDelLayer(SrcGroupIdx, SrcLayerIdx);
-		pCurrentGroup->m_vpLayers.erase(pCurrentGroup->m_vpLayers.begin() + SrcLayerIdx);
-		int DstLayerIdx;
+		pCurrentGroup->m_vpLayers.erase(pCurrentGroup->m_vpLayers.begin() + pCurrentGroup->m_vpLayers.size() - 1);
 		if(Value == m_Previous)
-		{
 			pPreviousGroup->m_vpLayers.insert(pPreviousGroup->m_vpLayers.begin() + m_LayerIndex, m_pLayer);
-			DstLayerIdx = m_LayerIndex;
-		}
 		else
-		{
 			pPreviousGroup->m_vpLayers.push_back(m_pLayer);
-			DstLayerIdx = (int)pPreviousGroup->m_vpLayers.size() - 1;
-		}
-		Editor()->m_MultiMappingSession.NotifyAddLayer(Value, DstLayerIdx, m_pLayer->m_Type, m_pLayer->m_aName, GetLayerSubType(m_pLayer));
-		Editor()->m_MultiMappingSession.SyncLayerContents(Value, DstLayerIdx);
 		Map()->m_SelectedGroup = Value;
 		Map()->SelectLayer(m_LayerIndex);
 	}
@@ -949,8 +880,6 @@ void CEditorActionEditLayerProp::Apply(int Value)
 	}
 
 	Map()->OnModify();
-	if(m_Prop == ELayerProp::HQ)
-		Editor()->m_MultiMappingSession.NotifyLayerFlags(m_GroupIndex, m_LayerIndex, m_pLayer->m_Flags);
 }
 
 CEditorActionEditLayerTilesProp::CEditorActionEditLayerTilesProp(CEditorMap *pMap, int GroupIndex, int LayerIndex, ETilesProp Prop, int Previous, int Current) :
@@ -1025,7 +954,7 @@ void CEditorActionEditLayerTilesProp::Undo()
 		else
 		{
 			pLayerTiles->m_Image = m_Previous % Map()->m_vpImages.size();
-			pLayerTiles->m_AutoMapperConfig = -1;
+			pLayerTiles->m_AutomapperConfig = -1;
 		}
 	}
 	else if(m_Prop == ETilesProp::COLOR)
@@ -1051,7 +980,7 @@ void CEditorActionEditLayerTilesProp::Undo()
 	}
 	else if(m_Prop == ETilesProp::AUTOMAPPER)
 	{
-		pLayerTiles->m_AutoMapperConfig = m_Previous;
+		pLayerTiles->m_AutomapperConfig = m_Previous;
 	}
 	else if(m_Prop == ETilesProp::LIVE_GAMETILES)
 	{
@@ -1063,36 +992,6 @@ void CEditorActionEditLayerTilesProp::Undo()
 	}
 
 	Map()->OnModify();
-	if(m_Prop == ETilesProp::WIDTH || m_Prop == ETilesProp::HEIGHT)
-	{
-		Editor()->m_MultiMappingSession.NotifyLayerProp(m_GroupIndex, m_LayerIndex, (int)m_Prop, m_Previous);
-		const auto &&NotifyCascadedResize = [this](const std::shared_ptr<CLayerTiles> &pCascaded) {
-			int CascadedGroup, CascadedLayer;
-			if(pCascaded && Editor()->m_MultiMappingSession.FindGroupAndLayer(pCascaded.get(), CascadedGroup, CascadedLayer))
-				Editor()->m_MultiMappingSession.NotifyLayerProp(CascadedGroup, CascadedLayer, (int)m_Prop, m_Prop == ETilesProp::WIDTH ? pCascaded->m_Width : pCascaded->m_Height);
-		};
-		if(pLayerTiles->m_HasGame || pLayerTiles->m_HasFront || pLayerTiles->m_HasSwitch || pLayerTiles->m_HasSpeedup || pLayerTiles->m_HasTune)
-		{
-			if(Map()->m_pFrontLayer && !pLayerTiles->m_HasFront)
-				NotifyCascadedResize(Map()->m_pFrontLayer);
-			if(Map()->m_pTeleLayer && !pLayerTiles->m_HasTele)
-				NotifyCascadedResize(Map()->m_pTeleLayer);
-			if(Map()->m_pSwitchLayer && !pLayerTiles->m_HasSwitch)
-				NotifyCascadedResize(Map()->m_pSwitchLayer);
-			if(Map()->m_pSpeedupLayer && !pLayerTiles->m_HasSpeedup)
-				NotifyCascadedResize(Map()->m_pSpeedupLayer);
-			if(Map()->m_pTuneLayer && !pLayerTiles->m_HasTune)
-				NotifyCascadedResize(Map()->m_pTuneLayer);
-			if(!pLayerTiles->m_HasGame)
-				NotifyCascadedResize(Map()->m_pGameLayer);
-		}
-	}
-	else if(m_Prop == ETilesProp::SHIFT)
-		Editor()->m_MultiMappingSession.NotifyFullSync();
-	else if(m_Prop == ETilesProp::IMAGE)
-		Editor()->m_MultiMappingSession.NotifySetImage(m_GroupIndex, m_LayerIndex, pLayerTiles->m_Image);
-	else if(m_Prop == ETilesProp::COLOR || m_Prop == ETilesProp::COLOR_ENV || m_Prop == ETilesProp::COLOR_ENV_OFFSET || m_Prop == ETilesProp::AUTOMAPPER || m_Prop == ETilesProp::SEED || m_Prop == ETilesProp::LIVE_GAMETILES)
-		Editor()->m_MultiMappingSession.NotifyLayerProp(m_GroupIndex, m_LayerIndex, (int)m_Prop, m_Previous);
 }
 
 void CEditorActionEditLayerTilesProp::Redo()
@@ -1139,7 +1038,7 @@ void CEditorActionEditLayerTilesProp::Redo()
 		else
 		{
 			pLayerTiles->m_Image = m_Current % Map()->m_vpImages.size();
-			pLayerTiles->m_AutoMapperConfig = -1;
+			pLayerTiles->m_AutomapperConfig = -1;
 		}
 	}
 	else if(m_Prop == ETilesProp::COLOR)
@@ -1165,7 +1064,7 @@ void CEditorActionEditLayerTilesProp::Redo()
 	}
 	else if(m_Prop == ETilesProp::AUTOMAPPER)
 	{
-		pLayerTiles->m_AutoMapperConfig = m_Current;
+		pLayerTiles->m_AutomapperConfig = m_Current;
 	}
 	else if(m_Prop == ETilesProp::LIVE_GAMETILES)
 	{
@@ -1177,36 +1076,6 @@ void CEditorActionEditLayerTilesProp::Redo()
 	}
 
 	Map()->OnModify();
-	if(m_Prop == ETilesProp::WIDTH || m_Prop == ETilesProp::HEIGHT)
-	{
-		Editor()->m_MultiMappingSession.NotifyLayerProp(m_GroupIndex, m_LayerIndex, (int)m_Prop, m_Current);
-		const auto &&NotifyCascadedResize = [this](const std::shared_ptr<CLayerTiles> &pCascaded) {
-			int CascadedGroup, CascadedLayer;
-			if(pCascaded && Editor()->m_MultiMappingSession.FindGroupAndLayer(pCascaded.get(), CascadedGroup, CascadedLayer))
-				Editor()->m_MultiMappingSession.NotifyLayerProp(CascadedGroup, CascadedLayer, (int)m_Prop, m_Prop == ETilesProp::WIDTH ? pCascaded->m_Width : pCascaded->m_Height);
-		};
-		if(pLayerTiles->m_HasGame || pLayerTiles->m_HasFront || pLayerTiles->m_HasSwitch || pLayerTiles->m_HasSpeedup || pLayerTiles->m_HasTune)
-		{
-			if(Map()->m_pFrontLayer && !pLayerTiles->m_HasFront)
-				NotifyCascadedResize(Map()->m_pFrontLayer);
-			if(Map()->m_pTeleLayer && !pLayerTiles->m_HasTele)
-				NotifyCascadedResize(Map()->m_pTeleLayer);
-			if(Map()->m_pSwitchLayer && !pLayerTiles->m_HasSwitch)
-				NotifyCascadedResize(Map()->m_pSwitchLayer);
-			if(Map()->m_pSpeedupLayer && !pLayerTiles->m_HasSpeedup)
-				NotifyCascadedResize(Map()->m_pSpeedupLayer);
-			if(Map()->m_pTuneLayer && !pLayerTiles->m_HasTune)
-				NotifyCascadedResize(Map()->m_pTuneLayer);
-			if(!pLayerTiles->m_HasGame)
-				NotifyCascadedResize(Map()->m_pGameLayer);
-		}
-	}
-	else if(m_Prop == ETilesProp::SHIFT)
-		Editor()->m_MultiMappingSession.NotifyFullSync();
-	else if(m_Prop == ETilesProp::IMAGE)
-		Editor()->m_MultiMappingSession.NotifySetImage(m_GroupIndex, m_LayerIndex, pLayerTiles->m_Image);
-	else if(m_Prop == ETilesProp::COLOR || m_Prop == ETilesProp::COLOR_ENV || m_Prop == ETilesProp::COLOR_ENV_OFFSET || m_Prop == ETilesProp::AUTOMAPPER || m_Prop == ETilesProp::SEED || m_Prop == ETilesProp::LIVE_GAMETILES)
-		Editor()->m_MultiMappingSession.NotifyLayerProp(m_GroupIndex, m_LayerIndex, (int)m_Prop, m_Current);
 }
 
 void CEditorActionEditLayerTilesProp::RestoreLayer(int Layer, const std::shared_ptr<CLayerTiles> &pLayerTiles)
@@ -1274,7 +1143,6 @@ void CEditorActionEditLayerQuadsProp::Apply(int Value)
 	}
 
 	Map()->OnModify();
-	Editor()->m_MultiMappingSession.NotifySetImage(m_GroupIndex, m_LayerIndex, pLayerQuads->m_Image);
 }
 
 // --------------------------------------------------------------
@@ -1307,17 +1175,6 @@ void CEditorActionEditLayersGroupAndOrder::Undo()
 
 	Map()->m_vSelectedLayers = m_LayerIndices;
 	Map()->m_SelectedGroup = m_GroupIndex;
-
-	// Sync to partner: delete from the new group (descending index order so the
-	// receiver's indices stay valid), then re-add into the old group (ascending).
-	for(int i = (int)m_NewLayerIndices.size() - 1; i >= 0; --i)
-		Editor()->m_MultiMappingSession.NotifyDelLayer(m_NewGroupIndex, m_NewLayerIndices[i]);
-	for(size_t s = 0; s < vpLayers.size(); ++s)
-	{
-		Editor()->m_MultiMappingSession.NotifyAddLayer(m_GroupIndex, m_LayerIndices[s], vpLayers[s]->m_Type, vpLayers[s]->m_aName, GetLayerSubType(vpLayers[s]));
-		Editor()->m_MultiMappingSession.SyncLayerContents(m_GroupIndex, m_LayerIndices[s]);
-	}
-	Map()->OnModify();
 }
 
 void CEditorActionEditLayersGroupAndOrder::Redo()
@@ -1339,18 +1196,9 @@ void CEditorActionEditLayersGroupAndOrder::Redo()
 
 	Map()->m_vSelectedLayers = m_NewLayerIndices;
 	Map()->m_SelectedGroup = m_NewGroupIndex;
-
-	// Sync to partner: delete from the old group (descending), re-add into the
-	// new group (ascending) so the receiver's indices stay valid each step.
-	for(int i = (int)m_LayerIndices.size() - 1; i >= 0; --i)
-		Editor()->m_MultiMappingSession.NotifyDelLayer(m_GroupIndex, m_LayerIndices[i]);
-	for(size_t s = 0; s < vpLayers.size(); ++s)
-	{
-		Editor()->m_MultiMappingSession.NotifyAddLayer(m_NewGroupIndex, m_NewLayerIndices[s], vpLayers[s]->m_Type, vpLayers[s]->m_aName, GetLayerSubType(vpLayers[s]));
-		Editor()->m_MultiMappingSession.SyncLayerContents(m_NewGroupIndex, m_NewLayerIndices[s]);
-	}
-	Map()->OnModify();
 }
+
+// -----------------------------------
 
 CEditorActionAppendMap::CEditorActionAppendMap(CEditorMap *pMap, const char *pMapName, const SPrevInfo &PrevInfo, std::vector<int> &vImageIndexMap) :
 	IEditorAction(pMap), m_PrevInfo(PrevInfo), m_vImageIndexMap(vImageIndexMap)
@@ -1368,19 +1216,19 @@ void CEditorActionAppendMap::Undo()
 	// - delete added sounds
 
 	// Delete added groups
-	while((int)Map()->m_vpGroups.size() != m_PrevInfo.m_Groups)
+	while((int)Map()->m_vpGroups.size() > m_PrevInfo.m_Groups)
 	{
 		Map()->m_vpGroups.pop_back();
 	}
 
 	// Delete added envelopes
-	while((int)Map()->m_vpEnvelopes.size() != m_PrevInfo.m_Envelopes)
+	while((int)Map()->m_vpEnvelopes.size() > m_PrevInfo.m_Envelopes)
 	{
 		Map()->m_vpEnvelopes.pop_back();
 	}
 
 	// Delete added sounds
-	while((int)Map()->m_vpSounds.size() != m_PrevInfo.m_Sounds)
+	while((int)Map()->m_vpSounds.size() > m_PrevInfo.m_Sounds)
 	{
 		Map()->m_vpSounds.pop_back();
 	}
@@ -1412,11 +1260,12 @@ void CEditorActionAppendMap::Undo()
 		});
 	}
 
-	while((int)Map()->m_vpImages.size() != m_PrevInfo.m_Images)
+	while((int)Map()->m_vpImages.size() > m_PrevInfo.m_Images)
 	{
 		Map()->m_vpImages.pop_back();
 	}
-	Editor()->m_MultiMappingSession.StartMapTransfer();
+
+	Map()->OnModify();
 }
 
 void CEditorActionAppendMap::Redo()
@@ -1427,16 +1276,15 @@ void CEditorActionAppendMap::Redo()
 	};
 	// Redo is just re-appending the same map
 	Map()->Append(m_aMapName, IStorage::TYPE_ALL, true, ErrorHandler);
-	Editor()->m_MultiMappingSession.StartMapTransfer();
 }
 
 // ---------------------------
 
-CEditorActionTileArt::CEditorActionTileArt(CEditorMap *pMap, int PreviousImageCount, const char *pTileArtFile, std::vector<int> &vImageIndexMap) :
+CEditorActionTileArt::CEditorActionTileArt(CEditorMap *pMap, int PreviousImageCount, const char *pFilename, std::vector<int> &vImageIndexMap) :
 	IEditorAction(pMap), m_PreviousImageCount(PreviousImageCount), m_vImageIndexMap(vImageIndexMap)
 {
-	str_copy(m_aTileArtFile, pTileArtFile);
-	str_copy(m_aDisplayText, "Tile art");
+	str_copy(m_aFilename, pFilename);
+	str_copy(m_aDisplayText, "Add tile art");
 }
 
 void CEditorActionTileArt::Undo()
@@ -1471,53 +1319,45 @@ void CEditorActionTileArt::Undo()
 		});
 	}
 
-	while((int)Map()->m_vpImages.size() != m_PreviousImageCount)
+	while((int)Map()->m_vpImages.size() > m_PreviousImageCount)
 	{
 		Map()->m_vpImages.pop_back();
 	}
-	Editor()->m_MultiMappingSession.StartMapTransfer();
 }
 
 void CEditorActionTileArt::Redo()
 {
-	if(!Graphics()->LoadPng(Editor()->m_TileArtImageInfo, m_aTileArtFile, IStorage::TYPE_ALL))
+	CImageInfo Image;
+	if(!Graphics()->LoadPng(Image, m_aFilename, IStorage::TYPE_ALL))
 	{
-		Editor()->ShowFileDialogError("Failed to load image from file '%s'.", m_aTileArtFile);
+		Editor()->ShowFileDialogError("Failed to load image from file '%s'.", m_aFilename);
 		return;
 	}
-
-	IStorage::StripPathAndExtension(m_aTileArtFile, Editor()->m_aTileArtFilename, sizeof(Editor()->m_aTileArtFilename));
-	Editor()->AddTileArt(true);
-	Editor()->m_MultiMappingSession.StartMapTransfer();
+	Map()->AddTileArt(std::move(Image), m_aFilename, true);
 }
 
 // ---------------------------
 
-CEditorActionQuadArt::CEditorActionQuadArt(CEditorMap *pMap, CQuadArtParameters Parameters) :
-	IEditorAction(pMap), m_Parameters(Parameters)
+CEditorActionQuadArt::CEditorActionQuadArt(CEditorMap *pMap, const std::shared_ptr<CLayerGroup> &pGroup) :
+	IEditorAction(pMap), m_pGroup(pGroup)
 {
-	str_copy(m_aDisplayText, "Create quad art");
+	str_copy(m_aDisplayText, "Add quad art");
 }
 
 void CEditorActionQuadArt::Undo()
 {
-	// Delete added group
-	Map()->m_vpGroups.pop_back();
-	Editor()->m_MultiMappingSession.StartMapTransfer();
+	// Delete added group (keep pointer for redo)
+	auto &vGroups = Map()->m_vpGroups;
+	auto It = std::find(vGroups.begin(), vGroups.end(), m_pGroup);
+	if(It != vGroups.end())
+		vGroups.erase(It);
 }
 
 void CEditorActionQuadArt::Redo()
 {
-	Editor()->m_QuadArtParameters = m_Parameters;
-	str_copy(Editor()->m_QuadArtParameters.m_aFilename, m_Parameters.m_aFilename, sizeof(Editor()->m_QuadArtParameters.m_aFilename));
-
-	if(!Graphics()->LoadPng(Editor()->m_QuadArtImageInfo, Editor()->m_QuadArtParameters.m_aFilename, IStorage::TYPE_ALL))
-	{
-		Editor()->ShowFileDialogError("Failed to load image from file '%s'.", Editor()->m_QuadArtParameters.m_aFilename);
-		return;
-	}
-	Editor()->AddQuadArt(true);
-	Editor()->m_MultiMappingSession.StartMapTransfer();
+	auto &vGroups = Map()->m_vpGroups;
+	if(std::find(vGroups.begin(), vGroups.end(), m_pGroup) == vGroups.end())
+		vGroups.push_back(m_pGroup);
 }
 
 // ---------------------------------
@@ -1561,35 +1401,30 @@ void CEditorCommandAction::Undo()
 	{
 		Map()->m_vSettings.insert(Map()->m_vSettings.begin() + m_CommandIndex, m_PreviousCommand.c_str());
 		*m_pSelectedCommandIndex = m_CommandIndex;
-		Editor()->m_MultiMappingSession.NotifySettingAdd(m_PreviousCommand.c_str());
 		break;
 	}
 	case EType::ADD:
 	{
 		Map()->m_vSettings.erase(Map()->m_vSettings.begin() + m_CommandIndex);
 		*m_pSelectedCommandIndex = Map()->m_vSettings.size() - 1;
-		Editor()->m_MultiMappingSession.NotifySettingDel(m_CommandIndex);
 		break;
 	}
 	case EType::EDIT:
 	{
 		str_copy(Map()->m_vSettings[m_CommandIndex].m_aCommand, m_PreviousCommand.c_str());
 		*m_pSelectedCommandIndex = m_CommandIndex;
-		Editor()->m_MultiMappingSession.NotifySettingEdit(m_CommandIndex, m_PreviousCommand.c_str());
 		break;
 	}
 	case EType::MOVE_DOWN:
 	{
 		std::swap(Map()->m_vSettings[m_CommandIndex], Map()->m_vSettings[m_CommandIndex + 1]);
 		*m_pSelectedCommandIndex = m_CommandIndex;
-		Editor()->m_MultiMappingSession.NotifySettingMove(m_CommandIndex + 1, -1);
 		break;
 	}
 	case EType::MOVE_UP:
 	{
 		std::swap(Map()->m_vSettings[m_CommandIndex], Map()->m_vSettings[m_CommandIndex - 1]);
 		*m_pSelectedCommandIndex = m_CommandIndex;
-		Editor()->m_MultiMappingSession.NotifySettingMove(m_CommandIndex - 1, 1);
 		break;
 	}
 	}
@@ -1603,35 +1438,30 @@ void CEditorCommandAction::Redo()
 	{
 		Map()->m_vSettings.erase(Map()->m_vSettings.begin() + m_CommandIndex);
 		*m_pSelectedCommandIndex = Map()->m_vSettings.size() - 1;
-		Editor()->m_MultiMappingSession.NotifySettingDel(m_CommandIndex);
 		break;
 	}
 	case EType::ADD:
 	{
 		Map()->m_vSettings.insert(Map()->m_vSettings.begin() + m_CommandIndex, m_PreviousCommand.c_str());
 		*m_pSelectedCommandIndex = m_CommandIndex;
-		Editor()->m_MultiMappingSession.NotifySettingAdd(m_PreviousCommand.c_str());
 		break;
 	}
 	case EType::EDIT:
 	{
 		str_copy(Map()->m_vSettings[m_CommandIndex].m_aCommand, m_CurrentCommand.c_str());
 		*m_pSelectedCommandIndex = m_CommandIndex;
-		Editor()->m_MultiMappingSession.NotifySettingEdit(m_CommandIndex, m_CurrentCommand.c_str());
 		break;
 	}
 	case EType::MOVE_DOWN:
 	{
 		std::swap(Map()->m_vSettings[m_CommandIndex], Map()->m_vSettings[m_CommandIndex + 1]);
 		*m_pSelectedCommandIndex = m_CommandIndex;
-		Editor()->m_MultiMappingSession.NotifySettingMove(m_CommandIndex, 1);
 		break;
 	}
 	case EType::MOVE_UP:
 	{
 		std::swap(Map()->m_vSettings[m_CommandIndex], Map()->m_vSettings[m_CommandIndex - 1]);
 		*m_pSelectedCommandIndex = m_CommandIndex;
-		Editor()->m_MultiMappingSession.NotifySettingMove(m_CommandIndex, -1);
 		break;
 	}
 	}
@@ -1909,7 +1739,7 @@ void CEditorActionDeleteEnvelopePoint::Redo()
 	std::shared_ptr<CEnvelope> pEnvelope = Map()->m_vpEnvelopes[m_EnvelopeIndex];
 	pEnvelope->m_vPoints.erase(pEnvelope->m_vPoints.begin() + m_PointIndex);
 
-	auto pSelectedPointIt = std::find_if(Map()->m_vSelectedEnvelopePoints.begin(), Map()->m_vSelectedEnvelopePoints.end(), [this](const std::pair<int, int> Pair) {
+	auto pSelectedPointIt = std::find_if(Map()->m_vSelectedEnvelopePoints.begin(), Map()->m_vSelectedEnvelopePoints.end(), [this](const std::pair<int, int> &Pair) {
 		return Pair.first == m_PointIndex;
 	});
 
@@ -1952,7 +1782,6 @@ void CEditorActionEditLayerSoundsProp::Apply(int Value)
 	}
 
 	Map()->OnModify();
-	Editor()->m_MultiMappingSession.NotifySetSound(m_GroupIndex, m_LayerIndex, pLayerSounds->m_Sound);
 }
 
 // ---
@@ -1971,14 +1800,12 @@ void CEditorActionDeleteSoundSource::Undo()
 	std::shared_ptr<CLayerSounds> pLayerSounds = std::static_pointer_cast<CLayerSounds>(m_pLayer);
 	pLayerSounds->m_vSources.insert(pLayerSounds->m_vSources.begin() + m_SourceIndex, m_Source);
 	Map()->m_SelectedSoundSource = m_SourceIndex;
-	Editor()->m_MultiMappingSession.NotifyAddSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex);
 	Map()->OnModify();
 }
 
 void CEditorActionDeleteSoundSource::Redo()
 {
 	std::shared_ptr<CLayerSounds> pLayerSounds = std::static_pointer_cast<CLayerSounds>(m_pLayer);
-	Editor()->m_MultiMappingSession.NotifyDelSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex);
 	pLayerSounds->m_vSources.erase(pLayerSounds->m_vSources.begin() + m_SourceIndex);
 	Map()->m_SelectedSoundSource--;
 	Map()->OnModify();
@@ -2009,10 +1836,6 @@ void CEditorActionEditSoundSourceShape::Undo()
 	pSource->m_Shape = m_SavedShape;
 
 	Map()->OnModify();
-	// sync restored shape type + size to partner (mirrors Redo)
-	Editor()->m_MultiMappingSession.NotifyEditSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex, 20, pSource->m_Shape.m_Type);
-	Editor()->m_MultiMappingSession.NotifyEditSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex, 21, pSource->m_Shape.m_Circle.m_Radius);
-	Editor()->m_MultiMappingSession.NotifyEditSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex, 22, pSource->m_Shape.m_Rectangle.m_Height);
 }
 
 void CEditorActionEditSoundSourceShape::Redo()
@@ -2039,10 +1862,6 @@ void CEditorActionEditSoundSourceShape::Redo()
 	}
 
 	Map()->OnModify();
-	// sync shape type + default size to partner
-	Editor()->m_MultiMappingSession.NotifyEditSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex, 20, pSource->m_Shape.m_Type);
-	Editor()->m_MultiMappingSession.NotifyEditSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex, 21, pSource->m_Shape.m_Circle.m_Radius);
-	Editor()->m_MultiMappingSession.NotifyEditSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex, 22, pSource->m_Shape.m_Rectangle.m_Height);
 }
 
 void CEditorActionEditSoundSourceShape::Save()
@@ -2128,7 +1947,6 @@ void CEditorActionEditSoundSourceProp::Apply(int Value)
 	}
 
 	Map()->OnModify();
-	Editor()->m_MultiMappingSession.NotifyEditSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex, (int)m_Prop, Value);
 }
 
 CEditorActionEditRectSoundSourceShapeProp::CEditorActionEditRectSoundSourceShapeProp(CEditorMap *pMap, int GroupIndex, int LayerIndex, int SourceIndex, ERectangleShapeProp Prop, int Previous, int Current) :
@@ -2159,12 +1977,10 @@ void CEditorActionEditRectSoundSourceShapeProp::Apply(int Value)
 	if(m_Prop == ERectangleShapeProp::RECTANGLE_WIDTH)
 	{
 		pSource->m_Shape.m_Rectangle.m_Width = Value;
-		Editor()->m_MultiMappingSession.NotifyEditSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex, 21, Value);
 	}
 	else if(m_Prop == ERectangleShapeProp::RECTANGLE_HEIGHT)
 	{
 		pSource->m_Shape.m_Rectangle.m_Height = Value;
-		Editor()->m_MultiMappingSession.NotifyEditSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex, 22, Value);
 	}
 
 	Map()->OnModify();
@@ -2197,7 +2013,6 @@ void CEditorActionEditCircleSoundSourceShapeProp::Apply(int Value)
 	if(m_Prop == ECircleShapeProp::CIRCLE_RADIUS)
 	{
 		pSource->m_Shape.m_Circle.m_Radius = Value;
-		Editor()->m_MultiMappingSession.NotifyEditSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex, 21, Value);
 	}
 
 	Map()->OnModify();
@@ -2215,8 +2030,6 @@ void CEditorActionNewEmptySound::Undo()
 {
 	// Undo is simply deleting the added source
 	std::shared_ptr<CLayerSounds> pLayerSounds = std::static_pointer_cast<CLayerSounds>(m_pLayer);
-	int SourceIdx = (int)pLayerSounds->m_vSources.size() - 1;
-	Editor()->m_MultiMappingSession.NotifyDelSoundSource(m_GroupIndex, m_LayerIndex, SourceIdx);
 	pLayerSounds->m_vSources.pop_back();
 
 	Map()->OnModify();
@@ -2226,8 +2039,6 @@ void CEditorActionNewEmptySound::Redo()
 {
 	std::shared_ptr<CLayerSounds> pLayerSounds = std::static_pointer_cast<CLayerSounds>(m_pLayer);
 	pLayerSounds->NewSource(m_X, m_Y);
-	int SourceIdx = (int)pLayerSounds->m_vSources.size() - 1;
-	Editor()->m_MultiMappingSession.NotifyAddSoundSource(m_GroupIndex, m_LayerIndex, SourceIdx);
 
 	Map()->OnModify();
 }
@@ -2242,8 +2053,6 @@ void CEditorActionNewEmptyQuad::Undo()
 {
 	// Undo is simply deleting the added quad
 	std::shared_ptr<CLayerQuads> pLayerQuads = std::static_pointer_cast<CLayerQuads>(m_pLayer);
-	int QuadIdx = (int)pLayerQuads->m_vQuads.size() - 1;
-	Editor()->m_MultiMappingSession.NotifyDelQuad(m_GroupIndex, m_LayerIndex, QuadIdx);
 	pLayerQuads->m_vQuads.pop_back();
 
 	Map()->OnModify();
@@ -2264,8 +2073,6 @@ void CEditorActionNewEmptyQuad::Redo()
 	pLayerQuads->NewQuad(m_X, m_Y, Width, Height);
 
 	Map()->OnModify();
-	int QuadIdx = (int)pLayerQuads->m_vQuads.size() - 1;
-	Editor()->m_MultiMappingSession.NotifyAddQuad(m_GroupIndex, m_LayerIndex, QuadIdx, pLayerQuads->m_vQuads[QuadIdx]);
 }
 
 // -------------
@@ -2282,8 +2089,6 @@ CEditorActionNewQuad::CEditorActionNewQuad(CEditorMap *pMap, int GroupIndex, int
 void CEditorActionNewQuad::Undo()
 {
 	std::shared_ptr<CLayerQuads> pLayerQuads = std::static_pointer_cast<CLayerQuads>(m_pLayer);
-	int QuadIdx = (int)pLayerQuads->m_vQuads.size() - 1;
-	Editor()->m_MultiMappingSession.NotifyDelQuad(m_GroupIndex, m_LayerIndex, QuadIdx);
 	pLayerQuads->m_vQuads.pop_back();
 }
 
@@ -2291,8 +2096,6 @@ void CEditorActionNewQuad::Redo()
 {
 	std::shared_ptr<CLayerQuads> pLayerQuads = std::static_pointer_cast<CLayerQuads>(m_pLayer);
 	pLayerQuads->m_vQuads.emplace_back(m_Quad);
-	int QuadIdx = (int)pLayerQuads->m_vQuads.size() - 1;
-	Editor()->m_MultiMappingSession.NotifyAddQuad(m_GroupIndex, m_LayerIndex, QuadIdx, m_Quad);
 }
 
 // --------------
@@ -2307,14 +2110,10 @@ void CEditorActionMoveSoundSource::Undo()
 {
 	dbg_assert(m_pLayer->m_Type == LAYERTYPE_SOUNDS, "Layer type does not match a sound layer");
 	std::static_pointer_cast<CLayerSounds>(m_pLayer)->m_vSources[m_SourceIndex].m_Position = m_OriginalPosition;
-	Editor()->m_MultiMappingSession.NotifyEditSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex, (int)ESoundProp::POS_X, m_OriginalPosition.x);
-	Editor()->m_MultiMappingSession.NotifyEditSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex, (int)ESoundProp::POS_Y, m_OriginalPosition.y);
 }
 
 void CEditorActionMoveSoundSource::Redo()
 {
 	dbg_assert(m_pLayer->m_Type == LAYERTYPE_SOUNDS, "Layer type does not match a sound layer");
 	std::static_pointer_cast<CLayerSounds>(m_pLayer)->m_vSources[m_SourceIndex].m_Position = m_CurrentPosition;
-	Editor()->m_MultiMappingSession.NotifyEditSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex, (int)ESoundProp::POS_X, m_CurrentPosition.x);
-	Editor()->m_MultiMappingSession.NotifyEditSoundSource(m_GroupIndex, m_LayerIndex, m_SourceIndex, (int)ESoundProp::POS_Y, m_CurrentPosition.y);
 }

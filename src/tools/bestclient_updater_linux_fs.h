@@ -1,5 +1,4 @@
-// Copyright © 2026 BestProject Team
-// Recursive filesystem helpers for the Linux updater (POSIX opendir/stat, no shelling out).
+/* Copyright © 2026 BestProject Team */
 #ifndef TOOLS_BESTCLIENT_UPDATER_LINUX_FS_H
 #define TOOLS_BESTCLIENT_UPDATER_LINUX_FS_H
 
@@ -75,8 +74,6 @@ inline void DeleteTree(const char *pPath)
 	rmdir(pPath);
 }
 
-// Recursively counts regular files under pDir. Clamped to at least 1 so
-// callers can safely use the result as a progress-percentage denominator.
 inline int CountFiles(const char *pDir)
 {
 	DIR *pDirHandle = opendir(pDir);
@@ -102,9 +99,6 @@ inline int CountFiles(const char *pDir)
 	return Count > 0 ? Count : 1;
 }
 
-// Recursively copies pSrc into pDst (pDst is created if missing), preserving
-// the source's permission bits (needed so the client binary keeps its
-// executable bit after being copied into the install directory).
 inline void CopyTree(const char *pSrc, const char *pDst, const std::function<void()> &PerFile = nullptr)
 {
 	struct stat SrcSt;
@@ -151,6 +145,6 @@ inline void CopyTree(const char *pSrc, const char *pDst, const std::function<voi
 	closedir(pDir);
 }
 
-} // namespace BcFs
+}
 
 #endif

@@ -3,7 +3,6 @@
 #define GAME_CLIENT_COMPONENTS_BESTCLIENT_TWITCH_CHAT_H
 
 #include <game/client/component.h>
-#include <game/client/ui_rect.h>
 
 #include <atomic>
 #include <cstdint>
@@ -11,7 +10,6 @@
 #include <mutex>
 #include <string>
 #include <thread>
-#include <utility>
 
 class CTwitchChat : public CComponent
 {
@@ -41,7 +39,6 @@ private:
 		MAX_CHANNEL_LENGTH = 64,
 		MAX_STATUS_LENGTH = 128,
 		MAX_QUEUED_MESSAGES = 256,
-		IRC_RECV_CHUNK = 2048,
 	};
 
 	struct SQueuedMessage
@@ -55,7 +52,6 @@ private:
 	std::atomic<bool> m_StopRequested{false};
 	std::atomic<bool> m_WorkerRunning{false};
 	EState m_State = EState::Disconnected;
-	char m_aChannel[MAX_CHANNEL_LENGTH] = "";
 	char m_aStatusText[MAX_STATUS_LENGTH] = "";
 	uint64_t m_ReceivedMessages = 0;
 	std::deque<SQueuedMessage> m_MessageQueue;

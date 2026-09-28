@@ -7,6 +7,7 @@
 
 #include <game/client/prediction/entity.h>
 #include <game/gamecore.h>
+#include <game/race_state.h>
 
 enum
 {
@@ -67,6 +68,7 @@ public:
 	bool Freeze(int Seconds);
 	bool Freeze();
 	bool Unfreeze();
+	void GiveAllWeapons();
 	int Team();
 	bool CanCollide(int ClientId) override;
 	bool SameTeam(int ClientId);
@@ -138,6 +140,10 @@ public:
 	// TClient
 	CNetObj_PlayerInput *LatestInput() { return &m_LatestInput; }
 
+	// antiping
+	void AntiPingInterference(int ClientId, bool DisallowReset = false, bool HasToBeUnfrozen = false);
+	bool IsInterfering() const { return m_Interfering; }
+
 private:
 	// weapon info
 	int m_aHitObjects[MAX_CLIENTS];
@@ -173,7 +179,7 @@ private:
 
 	// DDRace
 
-	static bool IsSwitchActiveCb(int Number, void *pUser);
+	static bool IsSwitchActiveCb(unsigned char Number, void *pUser);
 	void HandleTiles(int Index);
 	void HandleSkippableTiles(int Index);
 	void DDRaceTick();
@@ -184,6 +190,8 @@ private:
 
 	int m_LastWeaponSwitchTick;
 	int m_LastTuneZoneTick;
+
+	bool m_Interfering;
 };
 
 #endif

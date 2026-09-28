@@ -8,7 +8,7 @@
 #include <string>
 #include <unordered_set>
 
-class CHttpRequest;
+class IHttpRequest;
 class CServerInfo;
 
 class CEgoFinishedMaps : public CComponent
@@ -29,7 +29,7 @@ private:
 	};
 
 	std::unordered_set<std::string> m_FinishedMaps;
-	std::shared_ptr<CHttpRequest> m_pTask;
+	std::shared_ptr<IHttpRequest> m_pTask;
 	char m_aPlayerName[PLAYER_NAME_LENGTH] = "";
 	char m_aLoadedPlayerName[PLAYER_NAME_LENGTH] = "";
 	int64_t m_NextRetry = 0;

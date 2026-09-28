@@ -1,3 +1,4 @@
+/* Copyright © 2026 BestProject Team */
 #ifndef GAME_CLIENT_COMPONENTS_BESTCLIENT_SPEC_PAUSE_RADIO_H
 #define GAME_CLIENT_COMPONENTS_BESTCLIENT_SPEC_PAUSE_RADIO_H
 
@@ -38,6 +39,7 @@ public:
 	CSpecPauseRadio();
 	int Sizeof() const override { return sizeof(*this); }
 
+	void OnInit() override;
 	void OnReset() override;
 	void OnRender() override;
 	void OnStateChange(int NewState, int OldState) override;
@@ -50,4 +52,4 @@ public:
 	bool IsActive() const { return m_Active; }
 };
 
-#endif // GAME_CLIENT_COMPONENTS_BESTCLIENT_SPEC_PAUSE_RADIO_H
+#endif

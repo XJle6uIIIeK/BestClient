@@ -3,24 +3,23 @@
 #define GAME_CLIENT_COMPONENTS_BESTCLIENT_VOICE_VOICE_H
 
 #include "protocol.h"
-#include "../subsystem_runtime.h"
 
 #include <game/client/component.h>
 #include <game/client/ui.h>
 
 #include <base/net.h>
-#include <base/system.h>
+#include <base/vmath.h>
 
 #include <engine/console.h>
 
 #include <SDL_audio.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <limits>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -28,14 +27,13 @@
 
 struct OpusEncoder;
 struct OpusDecoder;
-class CHttpRequest;
+class IHttpRequest;
 
 class CVoiceChat : public CComponent
 {
 public:
 	int Sizeof() const override { return sizeof(*this); }
 
-	// Voice moderation — public interface for the moderation popup in the settings menu
 	struct SModPlayer
 	{
 		uint16_t m_SessionId = 0;
@@ -58,15 +56,14 @@ public:
 	void OnUpdate() override;
 	void OnShutdown() override;
 	bool IsClientTalking(int ClientId) const;
+	bool IsNameMuted(const char *pName) const;
+	int GetNameVolumePercent(const char *pName) const;
 	void RenderHudTalkingIndicator(float HudWidth, float HudHeight, bool ForcePreview = false);
 	void RenderHudMuteStatusIndicator(float HudWidth, float HudHeight, bool ForcePreview = false);
 	CUIRect GetHudTalkingIndicatorRect(float HudWidth, float HudHeight, bool ForcePreview = false) const;
 	CUIRect GetHudMuteStatusIndicatorRect(float HudWidth, float HudHeight, bool ForcePreview = false) const;
-	// Renders only the voice settings block for the Others settings tab.
 	void RenderMenuSettingsBlock(const CUIRect &View, float RevealPhase = 1.0f);
-	// Returns dynamic height for the voice settings block in menus.
 	float GetMenuSettingsBlockHeight(float RevealPhase = 1.0f) const;
-	// Handles chat commands (!vmute, !vunmute, !volume, !vradius). Returns true if consumed locally (not sent to server).
 	bool TryHandleChatCommand(const char *pLine);
 
 private:
@@ -95,7 +92,7 @@ private:
 			size_t Offset = 0;
 			while(Remaining > 0)
 			{
-				const size_t Chunk = minimum(Remaining, Capacity - Tail);
+				const size_t Chunk = std::min(Remaining, Capacity - Tail);
 				for(size_t i = 0; i < Chunk; ++i)
 					m_aData[Tail + i] = pData[Offset + i];
 				Tail = (Tail + Chunk) % Capacity;
@@ -110,7 +107,7 @@ private:
 		{
 			if(Count == 0 || pDst == nullptr)
 				return 0;
-			const size_t Actual = minimum(Count, m_Size);
+			const size_t Actual = std::min(Count, m_Size);
 			for(size_t i = 0; i < Actual; ++i)
 				pDst[i] = m_aData[(m_Head + i) % Capacity];
 			DiscardFront(Actual);
@@ -119,7 +116,7 @@ private:
 
 		size_t DiscardFront(size_t Count)
 		{
-			const size_t Actual = minimum(Count, m_Size);
+			const size_t Actual = std::min(Count, m_Size);
 			m_Head = (m_Head + Actual) % Capacity;
 			m_Size -= Actual;
 			return Actual;
@@ -205,16 +202,13 @@ private:
 	bool m_HelloResetPending = false;
 	bool m_SecondaryHelloResetPending = false;
 
-	// Challenge-response state for primary socket
 	bool m_ChallengeActive = false;
 	uint8_t m_ChallengeNonce[BestClientVoice::CHALLENGE_NONCE_SIZE] = {};
-	std::vector<uint8_t> m_PendingHelloPayload; // hello body sent before challenge arrived
-	// Challenge-response state for secondary socket
+	std::vector<uint8_t> m_PendingHelloPayload;
 	bool m_SecondaryChallengeActive = false;
 	uint8_t m_SecondaryChallengeNonce[BestClientVoice::CHALLENGE_NONCE_SIZE] = {};
 	std::vector<uint8_t> m_SecondaryPendingHelloPayload;
 	ERuntimeState m_RuntimeState = RUNTIME_STOPPED;
-	ESubsystemRuntimeState m_SubsystemState = ESubsystemRuntimeState::DISABLED;
 
 	SDL_AudioDeviceID m_CaptureDevice = 0;
 	SDL_AudioDeviceID m_PlaybackDevice = 0;
@@ -264,24 +258,29 @@ private:
 	int m_LastOutputDevice = -2;
 	std::vector<CVoiceServerEntry> m_vServerEntries;
 	std::vector<CButtonContainer> m_ServerRowButtons;
-	std::shared_ptr<CHttpRequest> m_pServerListTask = nullptr;
+	std::shared_ptr<IHttpRequest> m_pServerListTask = nullptr;
 	std::string m_AdvertisedRoomKey;
 	std::string m_AdvertisedPlayerName;
 	int m_AdvertisedGameClientId = BestClientVoice::INVALID_GAME_CLIENT_ID - 1;
 	int m_AdvertisedTeam = std::numeric_limits<int>::min();
+	CUuid m_ClientInstanceId = UUID_ZEROED;
+	uint8_t m_LinkToken[BestClientVoice::LINK_TOKEN_SIZE] = {};
+	bool m_HasLinkToken = false;
+	bool m_OfficialRejected = false;
+	int64_t m_LastUnofficialNoticeTick = 0;
 	std::string m_SecondaryAdvertisedRoomKey;
 	std::string m_SecondaryAdvertisedPlayerName;
 	int m_SecondaryAdvertisedGameClientId = BestClientVoice::INVALID_GAME_CLIENT_ID - 1;
 	int m_SecondaryAdvertisedTeam = std::numeric_limits<int>::min();
+	CUuid m_SecondaryClientInstanceId = UUID_ZEROED;
 	float m_EnableYourGroupRevealPhase = 0.0f;
 	bool m_LastUseTeam0Mode = false;
 	bool m_LastEnableYourGroup = false;
 
-	// Voice moderation
 	bool m_ModAuthed = false;
 	bool m_ModAuthFailed = false;
 	bool m_ModAuthPending = false;
-	std::string m_PendingModKey; // key held in memory until challenge arrives; cleared after response
+	std::string m_PendingModKey;
 	bool m_IsMutedByMod = false;
 	int64_t m_MutedByModNotifyTick = 0;
 	std::vector<SModPlayer> m_vModPlayers;
@@ -338,6 +337,7 @@ private:
 	void ProcessPlayback();
 	void CleanupPeers();
 	bool ShouldTransmit() const;
+	void NotifyUnofficialTalkAttempt();
 	bool IsInGameOnlyBlocked() const;
 	int LocalTeam() const;
 	int LocalVoiceTeam() const;

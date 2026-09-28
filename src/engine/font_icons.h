@@ -16,17 +16,10 @@ namespace FontIcon
 	inline const char *const BACKWARD_FAST = "\uF049";
 	inline const char *const BACKWARD_STEP = "\uF048";
 	inline const char *const BAN = "\uF05E";
-	inline const char *const BOMB = "\uF1E2";
 	inline const char *const BOOKMARK = "\uF02E";
 	inline const char *const BORDER_ALL = "\uF84C";
+	inline const char *const BRUSH = "\uF55D";
 	inline const char *const CAMERA = "\uF030";
-	inline const char *const CHECK = "\uF00C";
-	inline const char *const CHESS_BISHOP = "\uF43A";
-	inline const char *const CHESS_KING = "\uF43F";
-	inline const char *const CHESS_KNIGHT = "\uF441";
-	inline const char *const CHESS_PAWN = "\uF443";
-	inline const char *const CHESS_QUEEN = "\uF445";
-	inline const char *const CHESS_ROOK = "\uF447";
 	inline const char *const CHEVRON_DOWN = "\uF078";
 	inline const char *const CHEVRON_LEFT = "\uF053";
 	inline const char *const CHEVRON_RIGHT = "\uF054";
@@ -37,6 +30,9 @@ namespace FontIcon
 	inline const char *const CLAPPERBOARD = "\uE131";
 	inline const char *const COMMENT = "\uF075";
 	inline const char *const COMMENT_SLASH = "\uF4B3";
+	// bestclient
+	inline const char *const COPY = "\uF0C5";
+	// bestclient
 	inline const char *const DICE_FIVE = "\uF523";
 	inline const char *const DICE_FOUR = "\uF524";
 	inline const char *const DICE_ONE = "\uF525";
@@ -58,7 +54,9 @@ namespace FontIcon
 	inline const char *const FORWARD_FAST = "\uF050";
 	inline const char *const FORWARD_STEP = "\uF051";
 	inline const char *const GEAR = "\uF013";
+	// bestclient
 	inline const char *const HEADPHONES = "\uF025";
+	// bestclient
 	inline const char *const HEART = "\uF004";
 	inline const char *const HEART_CRACK = "\uF7A9";
 	inline const char *const HOUSE = "\uF015";
@@ -71,7 +69,9 @@ namespace FontIcon
 	inline const char *const LOCK = "\uF023";
 	inline const char *const MAGNIFYING_GLASS = "\uF002";
 	inline const char *const MAP = "\uF279";
+	// bestclient
 	inline const char *const MICROPHONE = "\uF130";
+	// bestclient
 	inline const char *const MINUS = "-";
 	inline const char *const MUSIC = "\uF001";
 	inline const char *const NETWORK_WIRED = "\uF6FF";
@@ -87,19 +87,17 @@ namespace FontIcon
 	inline const char *const RIGHT_FROM_BRACKET = "\uF2F5";
 	inline const char *const RIGHT_TO_BRACKET = "\uF2F6";
 	inline const char *const SLASH = "\uF715";
-	inline const char *const SNAKE = "\uF83E";
 	inline const char *const SORT_DOWN = "\uF0DD";
 	inline const char *const SORT_UP = "\uF0DE";
 	inline const char *const SQUARE_MINUS = "\uF146";
 	inline const char *const SQUARE_PLUS = "\uF0FE";
 	inline const char *const STAR = "\uF005";
 	inline const char *const STOP = "\uF04D";
-	inline const char *const TABLE_TENNIS_PADDLE_BALL = "\uF45D";
 	inline const char *const TERMINAL = "\uF120";
 	inline const char *const TRASH = "\uF1F8";
 	inline const char *const TRIANGLE_EXCLAMATION = "\uF071";
 	inline const char *const UNDO = "\uF2EA";
-	inline const char *const UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER = "\uF424";
+	inline const char *const UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER = "\uF424"; // bestclient
 	inline const char *const USER = "\uF007";
 	inline const char *const VIDEO = "\uF03D";
 	inline const char *const XMARK = "\uF00D";

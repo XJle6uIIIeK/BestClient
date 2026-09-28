@@ -1,12 +1,12 @@
 /* Copyright © 2026 BestProject Team */
 #include "fast_actions.h"
 
-#include <base/math.h>
+#include <base/str.h>
 
 #include <engine/graphics.h>
+#include <engine/keys.h>
 #include <engine/shared/config.h>
 
-#include <game/client/bc_ui_animations.h>
 #include <game/client/gameclient.h>
 #include <game/client/ui.h>
 #include <game/localization.h>
@@ -64,6 +64,14 @@ int KeyToSlotIndex(int Key)
 	case KEY_KP_6: return 5;
 	default: return -1;
 	}
+}
+
+float EaseInOutQuad(float t)
+{
+	t = std::clamp(t, 0.0f, 1.0f);
+	if(t < 0.5f)
+		return 2.0f * t * t;
+	return 1.0f - std::pow(-2.0f * t + 2.0f, 2.0f) / 2.0f;
 }
 
 } // namespace
@@ -249,14 +257,6 @@ void CFastActions::OnRelease()
 	m_Active = false;
 }
 
-bool CFastActions::OnCursorMove(float x, float y, IInput::ECursorType CursorType)
-{
-	(void)x;
-	(void)y;
-	(void)CursorType;
-	return false;
-}
-
 bool CFastActions::OnInput(const IInput::CEvent &Event)
 {
 	if(!g_Config.m_BcFastActions)
@@ -320,7 +320,6 @@ void CFastActions::OnRender()
 	}
 	else
 	{
-		// Re-trigger the appear animation whenever the displayed slot changes.
 		if(ShouldBeVisible && m_DisplayBind != m_SelectedBind)
 		{
 			m_DisplayBind = m_SelectedBind;
@@ -329,9 +328,9 @@ void CFastActions::OnRender()
 
 		const float Delta = Client()->RenderFrameTime();
 		if(ShouldBeVisible)
-			m_AnimationTime = minimum(AnimationTime, m_AnimationTime + Delta);
+			m_AnimationTime = std::min(AnimationTime, m_AnimationTime + Delta);
 		else
-			m_AnimationTime = maximum(0.0f, m_AnimationTime - Delta);
+			m_AnimationTime = std::max(0.0f, m_AnimationTime - Delta);
 
 		if(!ShouldBeVisible && m_AnimationTime <= 0.0f)
 		{
@@ -343,7 +342,7 @@ void CFastActions::OnRender()
 			return;
 
 		const float Progress = std::clamp(m_AnimationTime / AnimationTime, 0.0f, 1.0f);
-		aAnimationPhase[0] = BCUiAnimations::EaseInOutQuad(Progress);
+		aAnimationPhase[0] = EaseInOutQuad(Progress);
 		aAnimationPhase[1] = aAnimationPhase[0] * aAnimationPhase[0];
 	}
 
@@ -408,7 +407,7 @@ void CFastActions::ExecuteHoveredBind()
 		return;
 
 	if(m_SelectedBind >= 0)
-		Console()->ExecuteLine(m_vBinds[m_SelectedBind].m_aCommand, IConsole::CLIENT_ID_UNSPECIFIED);
+		ExecuteBind(m_SelectedBind);
 }
 
 void CFastActions::ConfigSaveCallback(IConfigManager *pConfigManager, void *pUserData)

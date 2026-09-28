@@ -4,7 +4,6 @@
 #include <engine/map.h>
 
 #include <game/client/components/maplayers.h>
-#include <game/client/components/menu_media_background.h>
 
 #include <cstdint>
 #include <memory>
@@ -25,7 +24,6 @@ protected:
 	std::unique_ptr<IMap> m_pBackgroundMap;
 	CLayers *m_pBackgroundLayers;
 	CMapImages *m_pBackgroundImages;
-	CMenuMediaBackground m_MediaBackground;
 
 public:
 	CBackground(ERenderType MapType = ERenderType::RENDERTYPE_BACKGROUND_FORCE, bool OnlineOnly = true);
@@ -33,13 +31,11 @@ public:
 	int Sizeof() const override { return sizeof(*this); }
 
 	void OnInit() override;
-	void OnShutdown() override;
 	void OnMapLoad() override;
 	void OnRender() override;
 
 	void LoadBackground();
 	const char *MapName() const { return m_aMapName; }
-	const CMenuMediaBackground &MediaBackground() const { return m_MediaBackground; }
 };
 
 #endif

@@ -6,6 +6,7 @@
 #include "render.h"
 
 #include <base/color.h>
+#include <base/types.h>
 #include <base/vmath.h>
 
 #include <engine/client.h>
@@ -28,6 +29,48 @@
 
 // components
 #include "components/background.h"
+#include "components/bestclient/bestclient.h" // bestclient
+#include "components/bestclient/admin_panel.h" // bestclient
+#include "components/bestclient/aspect_ratio.h" // bestclient
+#include "components/bestclient/3d_particles.h" // bestclient
+#include "components/bestclient/jelly_tee.h" // bestclient
+#include "components/bestclient/gradient.h" // bestclient
+#include "components/bestclient/flying_name_plates.h" // bestclient
+#include "components/bestclient/quick_binds.h" // bestclient
+#include "components/bestclient/rollback_demo.h" // bestclient
+#include "components/bestclient/fast_actions.h" // bestclient
+#include "components/bestclient/snap_tap.h" // bestclient
+#include "components/bestclient/optimizer.h" // bestclient
+#include "components/bestclient/process_priority.h" // bestclient
+#include "components/bestclient/music_player.h" // bestclient
+#include "components/bestclient/browser_utils.h" // bestclient
+#include "components/bestclient/ego_finished_maps.h" // bestclient
+#include "components/bestclient/ego_tiles_prediction.h" // bestclient
+#include "components/bestclient/edgehelper.h" // bestclient
+#include "components/bestclient/fast_practice.h" // bestclient
+#include "components/bestclient/finish_prediction.h" // bestclient
+#include "components/bestclient/keystrokes.h" // bestclient
+// bestclient
+#include "components/bestclient/weapon_vfx.h"
+#include "components/bestclient/fx/components.h"
+// bestclient
+#include "components/bestclient/hud_editor.h" // bestclient
+#include "components/bestclient/chat_bubbles.h" // bestclient
+#include "components/bestclient/physicball.h" // bestclient
+#include "components/bestclient/automargin.h" // bestclient
+#include "components/bestclient/cloud_input.h" // bestclient
+#include "components/bestclient/chat_media.h" // bestclient
+#include "components/bestclient/cursor_trail.h" // bestclient
+#include "components/bestclient/ui_animations.h" // bestclient
+#include "components/bestclient/gif_bubbles.h" // bestclient
+#include "components/bestclient/spec_pause_radio.h" // bestclient
+#include "components/bestclient/show_points.h" // bestclient
+#include "components/bestclient/clientindicator/client_indicator.h" // bestclient
+#include "components/bestclient/voice/voice.h" // bestclient
+#include "components/bestclient/twitch_chat.h" // bestclient
+// bestclient
+#include "components/bestclient/translate.h" // bestclient
+// bestclient
 #include "components/binds.h"
 #include "components/broadcast.h"
 #include "components/camera.h"
@@ -65,7 +108,6 @@
 #include "components/sounds.h"
 #include "components/spectator.h"
 #include "components/statboard.h"
-#include "components/bestclient/clientindicator/client_indicator.h"
 #include "components/tclient/bg_draw.h"
 #include "components/tclient/bindchat.h"
 #include "components/tclient/bindwheel.h"
@@ -82,31 +124,6 @@
 #include "components/tclient/statusbar.h"
 #include "components/tclient/tclient.h"
 #include "components/tclient/trails.h"
-#include "components/bestclient/3d_particles.h"
-#include "components/bestclient/admin_panel.h"
-#include "components/bestclient/automargin.h"
-#include "components/bestclient/chat_bubbles.h"
-#include "components/bestclient/cloud_input.h"
-#include "components/bestclient/edgehelper.h"
-#include "components/bestclient/ego_finished_maps.h"
-#include "components/bestclient/physicball.h"
-#include "components/bestclient/process_priority.h"
-#include "components/bestclient/spec_pause_radio.h"
-#include "components/bestclient/fast_actions.h"
-#include "components/bestclient/fast_practice.h"
-#include "components/bestclient/gif_bubbles.h"
-#include "components/bestclient/gradient.h"
-#include "components/bestclient/hookcombo.h"
-#include "components/bestclient/hud_editor.h"
-#include "components/bestclient/music_player.h"
-#include "components/bestclient/quick_binds.h"
-#include "components/bestclient/self_time_cp.h"
-#include "components/bestclient/show_points.h"
-#include "components/bestclient/swap_timer.h"
-#include "components/bestclient/translate.h"
-#include "components/bestclient/twitch_chat.h"
-#include "components/bestclient/voice/voice.h"
-#include "components/bestclient/clans/clans.h"
 #include "components/tclient/warlist.h"
 #include "components/tooltips.h"
 #include "components/touch_controls.h"
@@ -167,6 +184,14 @@ public:
 	bool m_DDRaceTeam;
 
 	bool m_PredictEvents;
+
+	bool m_OldLaser;
+
+	// zero if the server does not send them
+	int m_MinTeamSize;
+	int m_MaxTeamSize;
+
+	int m_NumDDRaceTeams;
 };
 
 class CSnapEntities
@@ -187,7 +212,7 @@ class CGameClient : public IGameClient
 {
 public:
 	friend class CTClient;
-	friend class CFastPractice; // BestClient
+	friend class CFastPractice; // bestclient
 
 	// all components
 	CInfoMessages m_InfoMessages;
@@ -206,6 +231,58 @@ public:
 	CCountryFlags m_CountryFlags;
 	CFlow m_Flow;
 	CHud m_Hud;
+	CBestClient m_BestClient; // bestclient
+	CEgoTilesPrediction m_EgoTilesPrediction; // bestclient
+	CSpecPauseRadio m_SpecPauseRadio; // bestclient
+	CShowPoints m_ShowPoints; // bestclient
+	CClientIndicator m_ClientIndicator; // bestclient
+	CVoiceChat m_VoiceChat; // bestclient
+	CAdminPanel m_AdminPanel; // bestclient
+	CAspectRatio m_AspectRatio; // bestclient
+	C3DParticles m_3DParticles; // bestclient
+	CJellyTee m_JellyTee; // bestclient
+	CBcGradient m_BcGradient; // bestclient
+	CFlyingNamePlates m_FlyingNamePlates; // bestclient
+	CQuickBinds m_QuickBinds; // bestclient
+	CRollbackDemo m_RollbackDemo; // bestclient
+	CFastActions m_FastActions; // bestclient
+	CSnapTap m_SnapTap; // bestclient
+	CCloudInput m_CloudInput; // bestclient
+	CFastPractice m_FastPractice; // bestclient
+	CBcAutoMargin m_BcAutoMargin; // bestclient
+	COptimizer m_Optimizer; // bestclient
+	CProcessPriority m_ProcessPriority; // bestclient
+	CMusicPlayer m_MusicPlayer; // bestclient
+	CBrowserUtils m_BrowserUtils; // bestclient
+	CTwitchChat m_TwitchChat; // bestclient
+	CEgoFinishedMaps m_EgoFinishedMaps; // bestclient
+	CEdgeHelper m_EdgeHelper; // bestclient
+	CFinishPrediction m_FinishPrediction; // bestclient
+	CKeystrokes m_Keystrokes; // bestclient
+	// bestclient
+	CWeaponVfx m_WeaponVfx;
+	CFgfWeather m_FgfWeather;
+	CLightning m_Lightning;
+	CHookWind m_HookWind;
+	CHookBlackHole m_HookBlackHole;
+	CHookMagic m_HookMagic;
+	CHookRainbow m_HookRainbow;
+	CHookLightning m_HookLightning;
+	CHookTentacle m_HookTentacle;
+	CHookFire m_HookFire;
+	CHookTroll m_HookTroll;
+	CHookRope m_HookRope;
+	CFgfActions m_FgfActions;
+	CFgfKi m_FgfKi;
+	CFgfIceWard m_FgfIceWard;
+	// bestclient
+	CHudEditor m_HudEditor; // bestclient
+	CChatBubbles m_ChatBubbles; // bestclient
+	CPhysicBalls m_PhysicBalls; // bestclient
+	CChatMedia m_ChatMedia; // bestclient
+	CCursorTrail m_CursorTrail; // bestclient
+	CBcUiAnimations m_BcUiAnimations; // bestclient
+	CGifBubbles m_GifBubbles; // bestclient
 	CImportantAlert m_ImportantAlert;
 	CDebugHud m_DebugHud;
 	CControls m_Controls;
@@ -245,35 +322,12 @@ public:
 	CStatusBar m_StatusBar;
 	CBindChat m_BindChat;
 	CBindWheel m_BindWheel;
-	CFastActions m_FastActions; // BestClient
-	CGifBubbles m_GifBubbles; // BestClient
-	CChatBubbles m_ChatBubbles; // BestClient
-	CPhysicBalls m_PhysicBalls; // BestClient (from Entity-Client)
-	CProcessPriority m_ProcessPriority; // BestClient (from Entity-Client)
-	CSpecPauseRadio m_SpecPauseRadio; // BestClient (from Entity-Client)
-	CFastPractice m_FastPractice; // BestClient
-	CCloudInput m_CloudInput; // BestClient
-	CEdgeHelper m_EdgeHelper; // BestClient (from RushieClient)
+	// bestclient
+	CTranslate m_Translate; // bestclient
+	// bestclient
 	CBgDraw m_BgDraw;
 	CTClient m_TClient;
 	CTrails m_Trails;
-	CTranslate m_Translate;
-	CHookCombo m_HookCombo;
-	CBcGradient m_BcGradient;
-	C3DParticles m_3DParticles;
-	CQuickBinds m_QuickBinds; // BestClient
-	CSelfTimeCp m_SelfTimeCp; // BestClient
-	CShowPoints m_ShowPoints; // BestClient
-	CEgoFinishedMaps m_EgoFinishedMaps; // BestClient
-	CClientIndicator m_ClientIndicator; // BestClient
-	CMusicPlayer m_MusicPlayer; // BestClient
-	CAdminPanel m_AdminPanel; // BestClient
-	CBcAutoMargin m_BcAutoMargin; // BestClient
-	CVoiceChat m_VoiceChat; // BestClient
-	CTwitchChat m_TwitchChat; // BestClient
-	CClans m_Clans; // BestClient
-	CHudEditor m_HudEditor; // BestClient
-	CSwapTimer m_SwapTimer; // BestClient
 	CPet m_Pet;
 	CPlayerIndicator m_PlayerIndicator;
 	COutlines m_Outlines;
@@ -283,8 +337,8 @@ public:
 	CScripting m_Scripting;
 	CMod m_Mod;
 	CCustomCommunities m_CustomCommunities;
-	CMovingTiles m_MovingTilesBackground = CMovingTiles{ false };
-	CMovingTiles m_MovingTilesForeground = CMovingTiles{ true };
+	CMovingTiles m_MovingTilesBackground = CMovingTiles{false};
+	CMovingTiles m_MovingTilesForeground = CMovingTiles{true};
 
 private:
 	std::vector<class CComponent *> m_vpAll;
@@ -321,8 +375,6 @@ private:
 
 	void ProcessEvents();
 	void UpdatePositions();
-	void UpdateAutoTeamLock();
-	void UpdateSpecMovedNotify();
 
 	int m_EditorMovementDelay = 5;
 	void UpdateEditorIngameMoved();
@@ -347,7 +399,7 @@ private:
 	static void ConchainSpecialInfoupdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConchainSpecialDummyInfoupdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConchainRefreshSkins(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
-	static void ConchainRefreshSkinMaxWidth(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
+	static void ConchainRefreshSkinMaxWidth(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData); // bestclient
 	static void ConchainRefreshEventSkins(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConchainSpecialDummy(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 
@@ -413,7 +465,6 @@ public:
 	bool m_SuppressEvents;
 	bool m_NewTick;
 	bool m_NewPredictedTick;
-	bool m_aPredictedHammerHitEvent[NUM_DUMMIES]; // BestClient: hook combo (hammer mode)
 	int m_aFlagDropTick[2];
 
 	enum
@@ -429,8 +480,15 @@ public:
 
 	vec2 m_LocalCharacterPos;
 
-	// predicted players
+	/**
+	 * Our prediction for the local character at tick
+	 * `IClient::PredGameTick() - 1`.
+	 */
 	CCharacterCore m_PredictedPrevChar;
+	/**
+	 * Our prediction for the local character at tick
+	 * `IClient::PredGameTick()`.
+	 */
 	CCharacterCore m_PredictedChar;
 
 	// snap pointers
@@ -443,8 +501,10 @@ public:
 		const CNetObj_SpectatorInfo *m_pSpectatorInfo;
 		const CNetObj_SpectatorInfo *m_pPrevSpectatorInfo;
 		const CNetObj_SpectatorCount *m_pSpectatorCount;
+		// bestclient
 		bool m_aSpectatorWatchers[MAX_CLIENTS];
 		int m_NumSpectatorWatchers;
+		// bestclient
 		int m_NumFlags;
 		const CNetObj_Flag *m_apFlags[CSnapshot::MAX_ITEMS];
 		const CNetObj_Flag *m_apPrevFlags[CSnapshot::MAX_ITEMS];
@@ -549,6 +609,9 @@ public:
 
 		char m_aName[MAX_NAME_LENGTH];
 		char m_aClan[MAX_CLAN_LENGTH];
+		/**
+		 * Country code in ISO 3166-1 numeric.
+		 */
 		int m_Country;
 		char m_aSkinName[MAX_SKIN_LENGTH];
 		int m_Team;
@@ -585,6 +648,9 @@ public:
 		vec2 m_ImprovedPredPos = vec2(0, 0);
 		vec2 m_PrevImprovedPredPos = vec2(0, 0);
 		bool m_ValidAntipingSmooth = false;
+		//vec2 m_DebugVector = vec2(0, 0);
+		//vec2 m_DebugVector2 = vec2(0, 0);
+		//vec2 m_DebugVector3 = vec2(0, 0);
 		float m_Uncertainty = 0.0f;
 		float m_VolleyBallAngle = 0.0f;
 		bool m_IsVolleyBall = false;
@@ -695,6 +761,8 @@ public:
 	CRenderTools m_RenderTools;
 	CRenderMap m_RenderMap;
 
+	bool m_BackButtonHandledKeyBind = false;
+
 	void OnReset();
 
 	size_t ComponentCount() const { return m_vpAll.size(); }
@@ -711,17 +779,17 @@ public:
 	template<typename T>
 	void ApplySkin7InfoFromGameMsg(const T *pMsg, int ClientId, int Conn);
 	void ApplySkin7InfoFromSnapObj(const protocol7::CNetObj_De_ClientInfo *pObj, int ClientId) override;
-	int OnDemoRecSnap7(class CSnapshot *pFrom, class CSnapshot *pTo, int Conn) override;
+	int OnDemoRecSnap7(CSnapshot *pFrom, CSnapshotBuffer *pTo, int Conn) override;
 	void *TranslateGameMsg(int *pMsgId, CUnpacker *pUnpacker, int Conn);
-	int TranslateSnap(CSnapshot *pSnapDstSix, CSnapshot *pSnapSrcSeven, int Conn, bool Dummy) override;
+	int TranslateSnap(CSnapshotBuffer *pSnapDstSix, CSnapshot *pSnapSrcSeven, int Conn, bool Dummy) override;
 	void OnMessage(int MsgId, CUnpacker *pUnpacker, int Conn, bool Dummy) override;
 	void InvalidateSnapshot() override;
-	void OnNewSnapshot() override;
+	void OnNewSnapshot(bool DummySwapped) override;
 	void OnPredict() override;
 	void OnActivateEditor() override;
 	void OnDummySwap() override;
 	int OnSnapInput(int *pData, bool Dummy, bool Force) override;
-	void PrepareInputForSend(int *pData, int Size, bool Dummy) override; // BestClient
+	void PrepareInputForSend(int *pData, int Size, bool Dummy) override; // bestclient
 	void OnShutdown() override;
 	void OnEnterGame() override;
 	void OnRconType(bool UsernameReq) override;
@@ -757,13 +825,6 @@ public:
 	const char *DDNetVersionStr() const override;
 	int ClientVersion7() const override;
 
-	// BestClient: optimizer
-	bool OptimizerEnabled() const;
-	bool OptimizerDisableParticles() const;
-	bool OptimizerFpsFogEnabled() const;
-	void OptimizerFpsFogHalfExtents(float &HalfW, float &HalfH) const;
-	bool OptimizerAllowRenderPos(vec2 WorldPos) const;
-
 	void DoTeamChangeMessage7(const char *pName, int ClientId, int Team, const char *pPrefix = "");
 
 	// actions
@@ -775,51 +836,56 @@ public:
 	bool GotWantedSkin7(bool Dummy);
 	void SendInfo(bool Start);
 	void SendDummyInfo(bool Start) override;
-	void SendKill();
-	void SendReadyChange7();
+	void SendKill(); // bestclient
+	void SendReadyChange7(); // NOLINT(readability-make-member-function-const)
 
 	void ApplyPreInputs(int Tick, bool Direct, CGameWorld &GameWorld);
 	bool GetDummyFastInput(CNetObj_PlayerInput &DummyFastInput, const CNetObj_PlayerInput *pDummyInputData, const class CCharacter *pDummyChar, int LocalTee, int DummyTee) const;
-	bool IsCloudInputMode() const;
-	bool IsFastInputLocalClient(int ClientId) const;
+	bool IsCloudInputMode() const; // bestclient
+	bool IsFastInputLocalClient(int ClientId) const; // bestclient
 
 	int m_aNextChangeInfo[NUM_DUMMIES];
 
 	// DDRace
 
 	int m_aLocalIds[NUM_DUMMIES];
+	int m_PredictedDummyId = -1; // bestclient
 	CNetObj_PlayerInput m_DummyInput;
 	CNetObj_PlayerInput m_HammerInput;
 	unsigned int m_DummyFire;
 	bool m_ReceivedDDNetPlayer;
 	bool m_ReceivedDDNetPlayerFinishTimes;
 	bool m_ReceivedDDNetPlayerFinishTimesMillis;
-	bool m_ReceivedPreInput = false;
+	bool m_ReceivedPreInput = false; // bestclient
 
-	class CTeamsCore m_Teams;
+	CTeamsCore m_Teams;
 
 	int IntersectCharacter(vec2 HookPos, vec2 NewPos, vec2 &NewPos2, int OwnId, vec2 *pPlayerPosition = nullptr);
 
 	int LastRaceTick() const;
 	int CurrentRaceTime() const;
 
-	bool IsTeamPlay() const { return m_Snap.m_pGameInfoObj && m_Snap.m_pGameInfoObj->m_GameFlags & GAMEFLAG_TEAMS; }
+	bool IsTeamPlay() const;
+	int MinTeamSize() const;
+	int MaxTeamSize() const;
+	bool IsWorldPaused() const;
+	bool IsDemoPlaybackPaused() const;
+	float GetAnimationPlaybackSpeed() const;
 
-	bool AntiPingPlayers() const { return m_FastPractice.ForcePredictPlayers() || (g_Config.m_ClAntiPing && g_Config.m_ClAntiPingPlayers && !m_Snap.m_SpecInfo.m_Active && Client()->State() != IClient::STATE_DEMOPLAYBACK); }
-	bool AntiPingGrenade() const { return m_FastPractice.ForcePredictGrenade() || (g_Config.m_ClAntiPing && g_Config.m_ClAntiPingGrenade && !m_Snap.m_SpecInfo.m_Active && Client()->State() != IClient::STATE_DEMOPLAYBACK); }
-	bool AntiPingWeapons() const { return m_FastPractice.ForcePredictWeapons() || (g_Config.m_ClAntiPing && g_Config.m_ClAntiPingWeapons && !m_Snap.m_SpecInfo.m_Active && Client()->State() != IClient::STATE_DEMOPLAYBACK); }
-	bool AntiPingGunfire() const { return m_FastPractice.ForcePredictGunfire() || (AntiPingGrenade() && AntiPingWeapons() && g_Config.m_ClAntiPingGunfire); }
+	// bestclient
+	bool OptimizerDisableParticles() const { return m_Optimizer.DisableParticles(); }
+	bool OptimizerFpsFogEnabled() const { return m_Optimizer.FpsFogEnabled(); }
+	void OptimizerFpsFogHalfExtents(float &HalfW, float &HalfH) const { m_Optimizer.FpsFogHalfExtents(HalfW, HalfH); }
+	bool OptimizerAllowRenderPos(vec2 WorldPos) const { return m_Optimizer.AllowRenderPos(WorldPos); }
+	// bestclient
+
+	int AntiPingPlayers() const;
+	bool AntiPingGrenade() const;
+	bool AntiPingWeapons() const;
+	bool AntiPingGunfire() const;
 	bool Predict() const;
-	bool PredictDummy() const
-	{
-		// BestClient: in fast practice the predicted dummy is a fixed practice participant
-		if(m_FastPractice.Active())
-		{
-			const int FastPracticeDummyId = m_FastPractice.CurrentPracticeDummyId();
-			return FastPracticeDummyId >= 0 && m_Snap.m_LocalClientId >= 0 && !m_aClients[FastPracticeDummyId].m_Paused;
-		}
-		return g_Config.m_ClPredictDummy && Client()->DummyConnected() && m_Snap.m_LocalClientId >= 0 && m_PredictedDummyId >= 0 && !m_aClients[m_PredictedDummyId].m_Paused;
-	}
+	bool PredictDummy() const;
+
 	const CTuningParams *GetTuning(int i) const { return &m_aTuningList[i]; }
 	ColorRGBA GetDDTeamColor(int DDTeam, float Lightness = 0.5f) const;
 	void FormatClientId(int ClientId, char (&aClientId)[16], EClientIdFormat Format) const;
@@ -839,17 +905,17 @@ public:
 	std::vector<SSwitchers> &PredSwitchers() { return m_PredictedWorld.m_Core.m_vSwitchers; }
 
 	void DummyResetInput() override;
-	void RenderSpecMovedNotify();
 	void Echo(const char *pString) override;
-	void Broadcast(const char *pString) override;
 	bool IsOtherTeam(int ClientId) const;
 	int SwitchStateTeam() const;
 	bool IsLocalCharSuper() const;
 	bool CanDisplayWarning() const override;
+	// bestclient
+	const char *LocalPlayerSkinName() const override;
+	// bestclient
 
 	IMap *Map() override { return m_pMap.get(); }
 	const IMap *Map() const override { return m_pMap.get(); }
-	const char *LocalPlayerSkinName() const override;
 	CNetObjHandler *GetNetObjHandler() override;
 	protocol7::CNetObjHandler *GetNetObjHandler7() override;
 
@@ -918,6 +984,7 @@ public:
 
 		// pickups
 		IGraphics::CTextureHandle m_SpritePickupHealth;
+		IGraphics::CTextureHandle m_SpritePickupFreeze;
 		IGraphics::CTextureHandle m_SpritePickupArmor;
 		IGraphics::CTextureHandle m_SpritePickupArmorShotgun;
 		IGraphics::CTextureHandle m_SpritePickupArmorGrenade;
@@ -1026,12 +1093,16 @@ public:
 	SClientExtrasSkin m_ExtrasSkin;
 	bool m_ExtrasSkinLoaded = false;
 
+	IGraphics::CTextureHandle m_CursorTextureOverride;
+	bool m_CursorTextureOverrideLoaded = false;
+	IGraphics::CTextureHandle m_ArrowTextureOverride;
+	bool m_ArrowTextureOverrideLoaded = false;
+
 	const std::vector<CSnapEntities> &SnapEntities() { return m_vSnapEntities; }
 
 	vec2 GetSmoothPos(int ClientId);
 	vec2 GetFreezePos(int ClientId);
 	vec2 GetFastInputPos(int ClientId);
-	vec2 BcGetCursorWorldPos() const;
 
 	int m_MultiViewTeam;
 	float m_MultiViewPersonalZoom;
@@ -1049,17 +1120,25 @@ public:
 private:
 	std::unique_ptr<IMap> m_pMap;
 
-	IGraphics::CTextureHandle m_CursorTextureOverride;
-	bool m_CursorTextureOverrideLoaded = false;
-	IGraphics::CTextureHandle m_ArrowTextureOverride;
-	bool m_ArrowTextureOverrideLoaded = false;
-
 	std::vector<CSnapEntities> m_vSnapEntities;
 	void SnapCollectEntities();
 
 	bool m_aDDRaceMsgSent[NUM_DUMMIES];
 	int m_aShowOthers[NUM_DUMMIES];
 	int m_aEnableSpectatorCount[NUM_DUMMIES]; // current setting as sent to the server, -1 if not yet sent
+
+	class CImageAsset
+	{
+	public:
+		bool IsLoaded() const { return m_ImageInfo.m_pData != nullptr; }
+
+		char m_aPath[IO_MAX_PATH_LENGTH];
+		bool m_IsDefault;
+		CImageInfo m_ImageInfo;
+		std::optional<CImageInfo> m_FallbackImageInfo;
+	};
+
+	CImageAsset LoadAssetFromPath(const char *pPath, bool AsDir, int AssetId, const char *pDirectory) const;
 
 	std::vector<std::shared_ptr<CManagedTeeRenderInfo>> m_vpManagedTeeRenderInfos;
 	void UpdateManagedTeeRenderInfos();
@@ -1070,22 +1149,12 @@ private:
 	void UpdateRenderedCharacters();
 	void HandlePredictedEvents(int Tick);
 
-
-	// BestClient: optimizer
-	void RenderOptimizerFpsFogRect();
-	int m_WasWindowActive = 1;
+	void OnInput(const IInput::CEvent &Event);
 
 	int m_aLastUpdateTick[MAX_CLIENTS] = {0};
 	void DetectStrongHook();
 
 	int m_IsDummySwapping;
-	int m_PredictedDummyId = -1; // BestClient
-	int m_aAutoTeamLockLastTeam[NUM_DUMMIES];
-	int64_t m_aAutoTeamLockDeadlineTick[NUM_DUMMIES];
-	bool m_aAutoTeamLockPending[NUM_DUMMIES];
-	int m_SpecMovedActiveTick = -1;
-	int m_SpecMovedLastTick = -1;
-	float m_SpecMovedNotifyTime = -999.0f;
 	CCharOrder m_CharOrder;
 	int m_aSwitchStateTeam[NUM_DUMMIES];
 
@@ -1103,10 +1172,10 @@ private:
 	float m_LastFollowFactor;
 	bool m_LastDummyConnected;
 
+	bool InitMultiView(int Team);
 	void HandleMultiView();
 	bool IsMultiViewIdSet();
 	void CleanMultiViewIds();
-	bool InitMultiView(int Team);
 	float CalculateMultiViewMultiplier(vec2 TargetPos);
 	float CalculateMultiViewZoom(vec2 MinPos, vec2 MaxPos, float Vel);
 	float MapValue(float MaxValue, float MinValue, float MaxRange, float MinRange, float Value);
@@ -1132,10 +1201,8 @@ private:
 public:
 	// TClient
 	int m_SmoothTick = 0;
-	float m_SmoothIntraTick = 0.0f;
+	float m_SmoothIntraTick = 0;
 	bool CheckNewInput() override;
-	bool IsSnapTapBlockedByCommunity() const;
-	bool IsAspectRatioBlockedByFng() const;
 	std::optional<CServerInfo> m_ConnectServerInfo = std::nullopt;
 	void SetConnectInfo(const NETADDR *pAddress) override;
 };

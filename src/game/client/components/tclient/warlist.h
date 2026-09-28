@@ -3,11 +3,8 @@
 
 #include <base/str.h>
 
-#include <cmath>
-
 #include <engine/console.h>
 #include <engine/shared/protocol.h>
-#include <engine/textrender.h>
 
 #include <game/client/component.h>
 
@@ -24,19 +21,15 @@ public:
 	// Intentionally named redundantly because it was confusing otherwise
 	char m_aWarName[MAX_WARLIST_TYPE_LENGTH] = "";
 	ColorRGBA m_Color = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
-	ColorRGBA m_Color2 = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
-	bool m_UseGradient = false;
 	bool m_Removable = true;
 	bool m_Imported = false;
 	int m_Index = 0;
-	CWarType(const char *pName, ColorRGBA Color = ColorRGBA(1, 1, 1, 1), bool Removable = true, bool IsImport = false, bool UseGradient = false, ColorRGBA Color2 = ColorRGBA(1, 1, 1, 1))
+	CWarType(const char *pName, ColorRGBA Color = ColorRGBA(1, 1, 1, 1), bool Removable = true, bool IsImport = false)
 	{
 		str_copy(m_aWarName, pName);
 		m_Color = Color;
 		m_Removable = Removable;
 		m_Imported = IsImport;
-		m_UseGradient = UseGradient;
-		m_Color2 = Color2;
 	}
 
 	bool operator==(const CWarType &Other) const
@@ -84,15 +77,11 @@ class CWarDataCache
 {
 public:
 	ColorRGBA m_NameColor = ColorRGBA(1, 1, 1, 1);
-	ColorRGBA m_NameColor2 = ColorRGBA(1, 1, 1, 1);
-	bool m_NameGradient = false;
 	ColorRGBA m_ClanColor = ColorRGBA(1, 1, 1, 1);
-	ColorRGBA m_ClanColor2 = ColorRGBA(1, 1, 1, 1);
-	bool m_ClanGradient = false;
 	bool m_WarName = false;
 	bool m_WarClan = false;
 
-	std::vector<char> m_WarGroupMatches = {false, false, false, false};
+	std::vector<char> m_WarGroupMatches = {false, false, false};
 
 	char m_aReason[MAX_WARLIST_REASON_LENGTH] = "";
 };
@@ -155,7 +144,6 @@ public:
 		new CWarType("none", ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f), false),
 		new CWarType("enemy", ColorRGBA(1.0f, 0.2f, 0.2f, 1.0f), false),
 		new CWarType("team", ColorRGBA(0.0f, 0.9f, 0.2f, 1.0f), false),
-		new CWarType("helper", ColorRGBA(0.35f, 0.65f, 1.0f, 1.0f), false),
 	};
 
 	// None type war entries will float to the top of the list, so they can be assigned a type
@@ -177,13 +165,13 @@ public:
 	void UpdateWarEntry(int Index, const char *pName, const char *pClan, const char *pReason, CWarType *pType);
 
 	// Adds a new war entry if the specified index is not found
-	void UpsertWarType(int Index, const char *pType, ColorRGBA Color, bool UseGradient = false, ColorRGBA Color2 = ColorRGBA(1, 1, 1, 1));
+	void UpsertWarType(int Index, const char *pType, ColorRGBA Color);
 
 	void AddWarEntryInGame(int WarType, const char *pName, const char *pReason, bool IsClan);
 	void RemoveWarEntryInGame(int WarType, const char *pName, bool IsClan);
 
 	void AddWarEntry(const char *pName, const char *pClan, const char *pReason, const char *pType);
-	void AddWarType(const char *pType, ColorRGBA Color, bool UseGradient = false, ColorRGBA Color2 = ColorRGBA(1, 1, 1, 1));
+	void AddWarType(const char *pType, ColorRGBA Color);
 
 	void RemoveWarEntry(const char *pName, const char *pClan, const char *pType);
 	void RemoveWarType(const char *pType);
@@ -197,13 +185,6 @@ public:
 	ColorRGBA GetPriorityColor(int ClientId);
 	ColorRGBA GetNameplateColor(int ClientId);
 	ColorRGBA GetClanColor(int ClientId);
-
-	// Builds per-character color splits interpolating Color1 -> Color2, same technique as gradient nicknames
-	static std::vector<STextColorSplit> BuildGradientColorSplits(const char *pText, const ColorRGBA &Color1, const ColorRGBA &Color2);
-	// Same as BuildGradientColorSplits, but the gradient continuously sweeps to the right as Phase increases (expects Phase in [0, 1))
-	static std::vector<STextColorSplit> BuildAnimatedGradientColorSplits(const char *pText, const ColorRGBA &Color1, const ColorRGBA &Color2, float Phase);
-	// SpeedPercent: full gradient sweeps per second, expressed as percent (bc_nameplate_gradient_animate_speed)
-	static float GradientAnimatePhase(double GlobalTime, int SpeedPercent) { return (float)std::fmod(GlobalTime * (SpeedPercent / 100.0), 1.0); }
 	bool GetAnyWar(int ClientId);
 	bool GetNameWar(int ClientId);
 	bool GetClanWar(int ClientId);

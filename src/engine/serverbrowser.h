@@ -5,6 +5,7 @@
 
 #include "kernel.h"
 
+#include <base/color.h>
 #include <base/hash.h>
 #include <base/str.h>
 
@@ -69,11 +70,20 @@ public:
 	public:
 		char m_aName[MAX_NAME_LENGTH];
 		char m_aClan[MAX_CLAN_LENGTH];
+		/**
+		 * Country code in ISO 3166-1 numeric.
+		 */
 		int m_Country;
 		int m_Score;
 		bool m_Player;
 		bool m_Afk;
 		int m_FriendState;
+		// bestclient
+		bool m_BestClient = false;
+		bool m_BestClientDeveloper = false;
+		bool m_BestClientFake = false; // bestclient
+
+		// bestclient
 		// skin info 0.6
 		char m_aSkin[MAX_SKIN_LENGTH];
 		bool m_CustomSkinColors;
@@ -83,15 +93,12 @@ public:
 		char m_aaSkin7[protocol7::NUM_SKINPARTS][protocol7::MAX_SKIN_LENGTH];
 		bool m_aUseCustomSkinColor7[protocol7::NUM_SKINPARTS];
 		int m_aCustomSkinColor7[protocol7::NUM_SKINPARTS];
-		bool m_BestClient;
-		bool m_BestClientDeveloper;
 	};
 
 	int m_ServerIndex;
 
 	int m_Type;
 	uint64_t m_ReceivedPackets;
-	int m_NumReceivedClients;
 
 	int m_NumAddresses;
 	NETADDR m_aAddresses[MAX_SERVER_ADDRESSES];
@@ -116,22 +123,29 @@ public:
 	int m_Latency; // in ms
 	ERankState m_HasRank;
 	char m_aGameType[16];
+	ColorRGBA m_GametypeColor;
 	char m_aName[64];
 	char m_aMap[MAX_MAP_LENGTH];
 	int m_MapCrc;
 	int m_MapSize;
 	char m_aVersion[32];
 	char m_aAddress[MAX_SERVER_ADDRESSES * NETADDR_MAXSTRSIZE];
-	CClient m_aClients[SERVERINFO_MAX_CLIENTS];
+	std::vector<CClient> m_vClients;
 	int m_NumFilteredPlayers;
 	bool m_RequiresLogin;
-	int m_NumBestClientPlayers;
-	bool m_HasBestClientPlayers;
-	int m_NumBestClientDeveloperPlayers;
-	bool m_HasBestClientDeveloperPlayers;
+	// bestclient
+	int m_NumBestClientPlayers = 0;
+	bool m_HasBestClientPlayers = false;
+	int m_NumBestClientDeveloperPlayers = 0;
+	bool m_HasBestClientDeveloperPlayers = false;
+	bool m_HasMapSha256 = false;
+	SHA256_DIGEST m_MapSha256{};
+	char m_aMapUrl[512]{};
+	// bestclient
 
 	static int EstimateLatency(int Loc1, int Loc2);
 	static bool ParseLocation(int *pResult, const char *pString);
+	static ColorRGBA GametypeColor(const char *pGametype);
 };
 
 class CCommunityCountryServer
@@ -155,6 +169,9 @@ class CCommunityCountry
 	friend class CServerBrowser;
 
 	char m_aName[CServerInfo::MAX_COMMUNITY_COUNTRY_LENGTH];
+	/**
+	 * Country code in ISO 3166-1 numeric.
+	 */
 	int m_FlagId;
 	std::vector<CCommunityCountryServer> m_vServers;
 
@@ -281,10 +298,11 @@ public:
 	/* Constants: Server Browser Sorting
 		SORT_NAME - Sort by name.
 		SORT_PING - Sort by ping.
-		SORT_MAP - Sort by map
+		SORT_MAP - Sort by map.
 		SORT_GAMETYPE - Sort by game type. DM, TDM etc.
 		SORT_NUMPLAYERS - Sort after how many players there are on the server.
 		SORT_NUMFRIENDS - Sort after how many friends there are on the server.
+		SORT_FAVORITES - Sort by favorite status, number of players and then ping.
 		SORT_NUMBESTCLIENT - Sort after how many BestClient players there are on the server.
 	*/
 	enum
@@ -295,7 +313,10 @@ public:
 		SORT_GAMETYPE,
 		SORT_NUMPLAYERS,
 		SORT_NUMFRIENDS,
+		SORT_FAVORITES,
+		// bestclient
 		SORT_NUMBESTCLIENT,
+		// bestclient
 	};
 
 	enum
@@ -330,18 +351,10 @@ public:
 		int64_t m_RequestTime;
 		bool m_RequestIgnoreInfo;
 		int m_GotInfo;
-		int m_RefreshGeneration;
 		CServerInfo m_Info;
 
 		CServerEntry *m_pPrevReq; // request list
 		CServerEntry *m_pNextReq;
-	};
-
-	struct CBestClientPlayerEntry
-	{
-		char m_aServerAddress[MAX_SERVER_ADDRESSES * NETADDR_MAXSTRSIZE];
-		char m_aName[MAX_NAME_LENGTH];
-		bool m_Developer;
 	};
 
 	static constexpr const char *COMMUNITY_DDNET = "ddnet";
@@ -356,6 +369,16 @@ public:
 	static constexpr const char *COMMUNITY_ALL = "all";
 
 	static constexpr const char *SEARCH_EXCLUDE_TOKEN = ";";
+
+	// bestclient
+	struct CBestClientPlayerEntry
+	{
+		char m_aServerAddress[MAX_SERVER_ADDRESSES * NETADDR_MAXSTRSIZE];
+		char m_aName[MAX_NAME_LENGTH];
+		bool m_Developer;
+		bool m_Fake;
+	};
+	// bestclient
 
 	virtual void Refresh(int Type, bool Force = false) = 0;
 	virtual bool IsRefreshing() const = 0;
@@ -398,7 +421,9 @@ public:
 	virtual CServerEntry *Find(const NETADDR &Addr) = 0;
 	virtual int GetCurrentType() = 0;
 	virtual const char *GetTutorialServer() = 0;
+	// bestclient
 	virtual void SetBestClientPlayers(const std::vector<CBestClientPlayerEntry> &vPlayers) = 0;
+	// bestclient
 };
 
 #endif

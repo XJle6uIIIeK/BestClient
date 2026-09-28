@@ -1,12 +1,4 @@
-// BestClient Updater — standalone Win32 GUI application.
-// Replaces the PowerShell update script. Receives four positional arguments:
-//   argv[1]  PID of the client process to wait for
-//   argv[2]  Absolute path to the downloaded .zip archive
-//   argv[3]  Install directory (directory containing DDNet.exe)
-//   argv[4]  Absolute path to the client executable to relaunch
-//
-// Only compiled on Windows (see CMakeLists.txt).
-
+/* Copyright © 2026 BestProject Team */
 #include <windows.h>
 #include <wingdi.h>
 #include <winuser.h>
@@ -23,22 +15,16 @@
 
 #pragma comment(lib, "shell32.lib")
 
-// ─── Window ──────────────────────────────────────────────────────────────────
-
 static const int WND_W = 480;
 static const int WND_H = 215;
 
-// BestClient logo-inspired theme: dark bg, green-to-orange gradient
 static const COLORREF C_BG         = RGB(22,  22,  22);
 static const COLORREF C_GREEN      = RGB(105, 190, 70);
 static const COLORREF C_ORANGE     = RGB(230, 80,  45);
 static const COLORREF C_TITLE      = RGB(235, 245, 232);
 static const COLORREF C_DIM        = RGB(140, 155, 135);
 static const COLORREF C_BAR_BG     = RGB(40,  40,  40);
-static const COLORREF C_BAR_SHINE  = RGB(155, 220, 105);
 static const COLORREF C_ERROR      = RGB(230, 75,  45);
-
-// ─── Shared state ─────────────────────────────────────────────────────────────
 
 static HWND              g_hWnd     = NULL;
 static std::atomic<int>  g_Percent  = 0;
@@ -46,8 +32,8 @@ static bool              g_Failed   = false;
 static CRITICAL_SECTION  g_Lock;
 static wchar_t           g_aStatus[256] = L"Starting...";
 
-#define WM_WORKER_TICK (WM_APP + 0)   // repaint
-#define WM_WORKER_DONE (WM_APP + 1)   // close window
+#define WM_WORKER_TICK (WM_APP + 0)
+#define WM_WORKER_DONE (WM_APP + 1)
 
 static void SetStatus(const wchar_t *pText)
 {
@@ -67,17 +53,9 @@ static void SetPercent(int Pct)
 		PostMessage(g_hWnd, WM_WORKER_TICK, 0, 0);
 }
 
-// ─── ZIP extraction (in-process) ─────────────────────────────────────────────
-//
-// The archive is unpacked with zlib inside this process rather than by shelling out to
-// tar.exe. Spawning a hidden LOLBIN to stage files that are then copied over the running
-// application's own executables is the textbook dropper sequence, and antivirus behaviour
-// monitors score it accordingly. Doing the inflate ourselves keeps the whole update inside
-// one binary with no child processes at all.
-
 namespace zip
 {
-// Little-endian scalar reads from the in-memory archive.
+
 static uint16_t Read16(const unsigned char *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
 static uint32_t Read32(const unsigned char *p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
 
@@ -85,24 +63,19 @@ static const uint32_t SIG_EOCD = 0x06054b50;
 static const uint32_t SIG_CDIR = 0x02014b50;
 static const uint32_t SIG_LOCAL = 0x04034b50;
 
-// Hard caps: a release archive is a few hundred MiB at most and holds a few thousand
-// files. Anything past these is treated as malformed rather than trusted.
 static const size_t MAX_ARCHIVE_BYTES = 512u * 1024u * 1024u;
 static const uint64_t MAX_ENTRY_BYTES = 512ull * 1024ull * 1024ull;
 static const size_t MAX_ENTRIES = 100000;
 
 struct SEntry
 {
-	std::string m_Name; // archive path, forward slashes
+	std::string m_Name;
 	uint64_t m_CompressedSize = 0;
 	uint64_t m_UncompressedSize = 0;
 	uint16_t m_Method = 0;
 	uint64_t m_LocalOffset = 0;
 };
 
-// Reject anything that could write outside the extraction root: absolute paths, drive
-// letters, and any ".." component. The archive comes from our own release pipeline, but it
-// arrives over the network and is unpacked with the user's privileges, so it gets checked.
 static bool IsSafeEntryName(const std::string &Name)
 {
 	if(Name.empty() || Name.size() > 512)
@@ -137,8 +110,6 @@ static std::wstring Widen(const std::string &Utf8)
 	return Out;
 }
 
-// Read the whole archive into memory. Release archives are small enough that streaming
-// would only add complexity.
 static bool ReadFileBytes(const wchar_t *pPath, std::vector<unsigned char> &vOut)
 {
 	const HANDLE hFile = CreateFileW(pPath, GENERIC_READ, FILE_SHARE_READ, NULL,
@@ -170,14 +141,12 @@ static bool ReadFileBytes(const wchar_t *pPath, std::vector<unsigned char> &vOut
 	return true;
 }
 
-// Parse the central directory. Only stored (0) and deflate (8) entries are accepted;
-// zip64 archives are rejected rather than half-handled.
 static bool ReadCentralDirectory(const std::vector<unsigned char> &vZip, std::vector<SEntry> &vOut)
 {
 	if(vZip.size() < 22)
 		return false;
 
-	// Locate the end-of-central-directory record, scanning back over the comment field.
+
 	size_t Eocd = 0;
 	bool Found = false;
 	const size_t MaxComment = vZip.size() < 65557 ? vZip.size() : 65557;
@@ -198,7 +167,7 @@ static bool ReadCentralDirectory(const std::vector<unsigned char> &vZip, std::ve
 	const uint32_t CdSize = Read32(&vZip[Eocd + 12]);
 	const uint32_t CdOffset = Read32(&vZip[Eocd + 16]);
 	if(Count == 0xffff || CdOffset == 0xffffffffu || CdSize == 0xffffffffu)
-		return false; // zip64, not produced by our release pipeline
+		return false;
 	if(Count > MAX_ENTRIES)
 		return false;
 	if((uint64_t)CdOffset + CdSize > vZip.size())
@@ -243,7 +212,6 @@ static bool ReadCentralDirectory(const std::vector<unsigned char> &vZip, std::ve
 	return true;
 }
 
-// Create every missing directory along Path (a full filesystem path).
 static void EnsureDirectories(const std::wstring &Path)
 {
 	for(size_t i = 0; i < Path.size(); ++i)
@@ -271,10 +239,9 @@ static bool WriteAll(HANDLE hFile, const unsigned char *pData, size_t Size)
 	return true;
 }
 
-// Inflate (or copy, for stored entries) a single member to DstPath.
 static bool ExtractEntry(const std::vector<unsigned char> &vZip, const SEntry &Entry, const std::wstring &DstPath)
 {
-	// The local header repeats the name/extra lengths; the payload starts after them.
+
 	if(Entry.m_LocalOffset + 30 > vZip.size() || Read32(&vZip[(size_t)Entry.m_LocalOffset]) != SIG_LOCAL)
 		return false;
 	const uint16_t LocalNameLen = Read16(&vZip[(size_t)Entry.m_LocalOffset + 26]);
@@ -300,7 +267,7 @@ static bool ExtractEntry(const std::vector<unsigned char> &vZip, const SEntry &E
 	else
 	{
 		z_stream Stream = {};
-		// Raw deflate: zip members carry no zlib header, hence the negative window bits.
+
 		if(inflateInit2(&Stream, -MAX_WBITS) != Z_OK)
 		{
 			CloseHandle(hFile);
@@ -335,7 +302,7 @@ static bool ExtractEntry(const std::vector<unsigned char> &vZip, const SEntry &E
 			}
 			else if(Ret == Z_BUF_ERROR)
 			{
-				Ok = false; // no progress possible: truncated member
+				Ok = false;
 				break;
 			}
 		} while(Ret != Z_STREAM_END);
@@ -351,7 +318,6 @@ static bool ExtractEntry(const std::vector<unsigned char> &vZip, const SEntry &E
 	return Ok;
 }
 
-// Unpack pArchive into pDestDir. PerEntry is called after each member for progress.
 static bool Extract(const wchar_t *pArchive, const wchar_t *pDestDir, const std::function<void(int, int)> &PerEntry)
 {
 	std::vector<unsigned char> vZip;
@@ -379,7 +345,7 @@ static bool Extract(const wchar_t *pArchive, const wchar_t *pDestDir, const std:
 				Ch = L'\\';
 		}
 
-		// A trailing slash marks a directory member: create it and move on.
+
 		if(Entry.m_Name.back() == '/')
 		{
 			EnsureDirectories(Full + L'\\');
@@ -396,14 +362,10 @@ static bool Extract(const wchar_t *pArchive, const wchar_t *pDestDir, const std:
 	}
 	return true;
 }
-} // namespace zip
+}
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-// Staging leftovers from a previous update attempt. Cleared after a successful install.
 static const wchar_t *k_OldSuffix = L".bc-update-old";
 
-// Recursively count files (not dirs) under pDir.
 static int CountFiles(const wchar_t *pDir)
 {
 	std::wstring Search(pDir);
@@ -426,7 +388,6 @@ static int CountFiles(const wchar_t *pDir)
 	return N > 0 ? N : 1;
 }
 
-// Plain recursive copy — used for user-asset backup/restore (must leave source intact).
 static void CopyTree(const wchar_t *pSrc, const wchar_t *pDst, std::function<void()> PerFile = nullptr)
 {
 	CreateDirectoryW(pDst, NULL);
@@ -451,10 +412,6 @@ static void CopyTree(const wchar_t *pSrc, const wchar_t *pDst, std::function<voi
 	FindClose(h);
 }
 
-// Install one file without overwriting an existing executable in place.
-// In-place CopyFileW of DDNet.exe is a textbook dropper signature for Defender's
-// Behavior:...DefenseEvasion ML. Rename the destination aside, then MoveFile the
-// staged file into place (same volume — extract lives under install_dir\update).
 static bool InstallFile(const wchar_t *pSrc, const wchar_t *pDst)
 {
 	const DWORD Attr = GetFileAttributesW(pDst);
@@ -463,11 +420,11 @@ static bool InstallFile(const wchar_t *pSrc, const wchar_t *pDst)
 	{
 		_snwprintf_s(aOld, _TRUNCATE, L"%ls%ls", pDst, k_OldSuffix);
 		DeleteFileW(aOld);
-		// Clear read-only so rename/delete can succeed on packaged files.
+
 		SetFileAttributesW(pDst, FILE_ATTRIBUTE_NORMAL);
 		if(!MoveFileExW(pDst, aOld, MOVEFILE_REPLACE_EXISTING))
 		{
-			// Destination locked — last resort copy (may still fail for our own image).
+
 			if(!CopyFileW(pSrc, pDst, FALSE))
 				return false;
 			DeleteFileW(pSrc);
@@ -482,10 +439,10 @@ static bool InstallFile(const wchar_t *pSrc, const wchar_t *pDst)
 		return true;
 	}
 
-	// Fall back to copy if move failed (rare on same volume).
+
 	if(!CopyFileW(pSrc, pDst, FALSE))
 	{
-		// Try to restore the previous file if we renamed it aside.
+
 		if(aOld[0])
 			MoveFileExW(aOld, pDst, MOVEFILE_REPLACE_EXISTING);
 		return false;
@@ -496,7 +453,6 @@ static bool InstallFile(const wchar_t *pSrc, const wchar_t *pDst)
 	return true;
 }
 
-// Recursively install staged files into the install directory via rename+move.
 static void InstallTree(const wchar_t *pSrc, const wchar_t *pDst, std::function<void()> PerFile = nullptr)
 {
 	CreateDirectoryW(pDst, NULL);
@@ -521,7 +477,6 @@ static void InstallTree(const wchar_t *pSrc, const wchar_t *pDst, std::function<
 	FindClose(h);
 }
 
-// Delete leftover *.bc-update-old files under pDir.
 static void CleanupOldFiles(const wchar_t *pDir)
 {
 	std::wstring Search(pDir);
@@ -549,7 +504,6 @@ static void CleanupOldFiles(const wchar_t *pDir)
 	FindClose(h);
 }
 
-// Recursively delete a directory and all its contents.
 static void DeleteTree(const wchar_t *pPath)
 {
 	std::wstring Search(pPath);
@@ -572,9 +526,6 @@ static void DeleteTree(const wchar_t *pPath)
 	RemoveDirectoryW(pPath);
 }
 
-// ─── Worker thread ────────────────────────────────────────────────────────────
-
-// Directories to preserve across updates (user-placed assets).
 static const wchar_t *k_aUserDirs[] = {
 	L"data\\assets\\arrow",
 	L"data\\assets\\arrows",
@@ -594,14 +545,14 @@ static void Fail(const wchar_t *pMsg)
 {
 	g_Failed = true;
 	SetStatus(pMsg);
-	// Leave window open so user can read the error. ESC closes it.
+
 }
 
 static DWORD WINAPI WorkerThread(LPVOID pParam)
 {
 	auto *pA = (WorkerArgs *)pParam;
 
-	// ── 1. Wait for the client to exit ────────────────────────────────────────
+
 	SetStatus(L"Waiting for client to close...");
 	SetPercent(2);
 	{
@@ -612,11 +563,11 @@ static DWORD WINAPI WorkerThread(LPVOID pParam)
 			CloseHandle(hProc);
 		}
 		else
-			Sleep(500); // PID already gone
+			Sleep(500);
 	}
 	SetPercent(8);
 
-	// ── 2. Prepare extraction directory ──────────────────────────────────────
+
 	wchar_t aExtract[MAX_PATH];
 	_snwprintf_s(aExtract, _TRUNCATE, L"%ls\\update\\extract", pA->aInstallDir);
 	DeleteTree(aExtract);
@@ -626,7 +577,7 @@ static DWORD WINAPI WorkerThread(LPVOID pParam)
 		delete pA; return 1;
 	}
 
-	// ── 3. Extract archive ───────────────────────────────────────────────────
+
 	SetStatus(L"Extracting update...");
 	if(!zip::Extract(pA->aArchive, aExtract, [](int Done, int Total)
 		{
@@ -639,7 +590,7 @@ static DWORD WINAPI WorkerThread(LPVOID pParam)
 	}
 	SetPercent(50);
 
-	// ── 4. Resolve copy root (archive may wrap files in a single subfolder) ──
+
 	wchar_t aCopyRoot[MAX_PATH];
 	wcscpy_s(aCopyRoot, aExtract);
 	{
@@ -666,7 +617,7 @@ static DWORD WINAPI WorkerThread(LPVOID pParam)
 		}
 	}
 
-	// ── 5. Backup user asset directories ─────────────────────────────────────
+
 	SetStatus(L"Backing up settings...");
 	wchar_t aBackup[MAX_PATH];
 	_snwprintf_s(aBackup, _TRUNCATE, L"%ls\\update\\backup_%lu", pA->aInstallDir, pA->Pid);
@@ -681,7 +632,7 @@ static DWORD WINAPI WorkerThread(LPVOID pParam)
 	}
 	SetPercent(55);
 
-	// ── 6. Install new files into install directory ───────────────────────────
+
 	SetStatus(L"Installing files...");
 	{
 		int Total = CountFiles(aCopyRoot);
@@ -695,7 +646,7 @@ static DWORD WINAPI WorkerThread(LPVOID pParam)
 	}
 	SetPercent(90);
 
-	// ── 7. Restore user assets ────────────────────────────────────────────────
+
 	SetStatus(L"Restoring settings...");
 	for(const wchar_t *pRel : k_aUserDirs)
 	{
@@ -707,7 +658,7 @@ static DWORD WINAPI WorkerThread(LPVOID pParam)
 	}
 	SetPercent(95);
 
-	// ── 8. Clean up temp files ────────────────────────────────────────────────
+
 	SetStatus(L"Cleaning up...");
 	DeleteFileW(pA->aArchive);
 	DeleteTree(aExtract);
@@ -715,7 +666,7 @@ static DWORD WINAPI WorkerThread(LPVOID pParam)
 	CleanupOldFiles(pA->aInstallDir);
 	SetPercent(100);
 
-	// ── 9. Launch client ──────────────────────────────────────────────────────
+
 	SetStatus(L"Launching BestClient...");
 	Sleep(500);
 
@@ -735,9 +686,6 @@ static DWORD WINAPI WorkerThread(LPVOID pParam)
 	return 0;
 }
 
-// ─── Painting ─────────────────────────────────────────────────────────────────
-
-// Linear interpolation between two COLORREF values (t = 0.0 .. 1.0).
 static COLORREF LerpColor(COLORREF A, COLORREF B, float T)
 {
 	int R = (int)(GetRValue(A) + T * (GetRValue(B) - GetRValue(A)));
@@ -746,7 +694,6 @@ static COLORREF LerpColor(COLORREF A, COLORREF B, float T)
 	return RGB(R, G, Bl);
 }
 
-// Draw a left-to-right horizontal gradient from C1 to C2 inside Rc.
 static void DrawGradientH(HDC Dc, RECT Rc, COLORREF C1, COLORREF C2)
 {
 	int W = Rc.right - Rc.left;
@@ -776,19 +723,19 @@ static void Paint(HWND hWnd)
 
 	RECT Rc; GetClientRect(hWnd, &Rc);
 
-	// Off-screen buffer
+
 	HDC Mem = CreateCompatibleDC(Dc);
 	HBITMAP Bmp = CreateCompatibleBitmap(Dc, Rc.right, Rc.bottom);
 	SelectObject(Mem, Bmp);
 
-	// Background
+
 	{
 		HBRUSH Br = CreateSolidBrush(C_BG);
 		FillRect(Mem, &Rc, Br);
 		DeleteObject(Br);
 	}
 
-	// Top accent bar — green-to-orange gradient (4 px)
+
 	{
 		RECT Bar = {0, 0, Rc.right, 4};
 		DrawGradientH(Mem, Bar, C_GREEN, C_ORANGE);
@@ -796,7 +743,7 @@ static void Paint(HWND hWnd)
 
 	SetBkMode(Mem, TRANSPARENT);
 
-	// Title "BestClient"
+
 	{
 		HFONT F = MakeFont(32, true);
 		HFONT Old = (HFONT)SelectObject(Mem, F);
@@ -807,7 +754,7 @@ static void Paint(HWND hWnd)
 		DeleteObject(F);
 	}
 
-	// "Updater" — same style as "BestClient", pulled up close
+
 	{
 		HFONT F = MakeFont(32, true);
 		HFONT Old = (HFONT)SelectObject(Mem, F);
@@ -818,14 +765,14 @@ static void Paint(HWND hWnd)
 		DeleteObject(F);
 	}
 
-	// Progress bar
+
 	const int BarL  = 40;
 	const int BarR  = Rc.right - 80;
 	const int BarT  = 110;
 	const int BarB  = 134;
 	const int BarH  = BarB - BarT;
 
-	// Bar background
+
 	{
 		RECT R = {BarL, BarT, BarR, BarB};
 		HBRUSH Br = CreateSolidBrush(C_BAR_BG);
@@ -833,13 +780,13 @@ static void Paint(HWND hWnd)
 		DeleteObject(Br);
 	}
 
-	// Bar fill — green-to-orange gradient matching the logo
+
 	int Pct      = g_Percent.load();
 	int FillW    = (BarR - BarL) * Pct / 100;
 	if(FillW > 0)
 	{
-		// Gradient spans the visible fill but colour positions are relative to
-		// the full bar width, so the hue advances as the bar grows.
+
+
 		COLORREF FillEnd = LerpColor(C_GREEN, C_ORANGE, (float)Pct / 100.0f);
 		RECT R = {BarL, BarT, BarL + FillW, BarB};
 		if(g_Failed)
@@ -854,7 +801,7 @@ static void Paint(HWND hWnd)
 		}
 	}
 
-	// Percent label
+
 	{
 		HFONT F = MakeFont(13, true);
 		HFONT Old = (HFONT)SelectObject(Mem, F);
@@ -867,7 +814,7 @@ static void Paint(HWND hWnd)
 		DeleteObject(F);
 	}
 
-	// Status text
+
 	{
 		HFONT F = MakeFont(13, false);
 		HFONT Old = (HFONT)SelectObject(Mem, F);
@@ -882,7 +829,7 @@ static void Paint(HWND hWnd)
 		DeleteObject(F);
 	}
 
-	// Hint when failed
+
 	if(g_Failed)
 	{
 		HFONT F = MakeFont(11, false);
@@ -900,8 +847,6 @@ static void Paint(HWND hWnd)
 	EndPaint(hWnd, &Ps);
 }
 
-// ─── Window procedure ─────────────────────────────────────────────────────────
-
 static LRESULT CALLBACK WndProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 {
 	switch(Msg)
@@ -911,7 +856,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lPara
 	case WM_WORKER_TICK: InvalidateRect(hWnd, NULL, FALSE); return 0;
 	case WM_WORKER_DONE: DestroyWindow(hWnd); return 0;
 	case WM_DESTROY:     PostQuitMessage(0); return 0;
-	// Allow dragging the borderless window from anywhere
+
 	case WM_NCHITTEST:
 		if(DefWindowProcW(hWnd, Msg, wParam, lParam) == HTCLIENT)
 			return HTCAPTION;
@@ -923,13 +868,11 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lPara
 	return DefWindowProcW(hWnd, Msg, wParam, lParam);
 }
 
-// ─── Entry point ──────────────────────────────────────────────────────────────
-
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
 {
 	InitializeCriticalSection(&g_Lock);
 
-	// Parse: argv[0]=exe, [1]=pid, [2]=archive, [3]=install_dir, [4]=exe_path
+
 	int Argc = 0;
 	LPWSTR *ppArgv = CommandLineToArgvW(GetCommandLineW(), &Argc);
 	if(Argc < 5 || !ppArgv)
@@ -947,7 +890,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
 	wcscpy_s(pArgs->aExePath,    ppArgv[4]);
 	LocalFree(ppArgv);
 
-	// Register window class
+
 	WNDCLASSEXW Wc      = {};
 	Wc.cbSize           = sizeof(Wc);
 	Wc.lpfnWndProc      = WndProc;
@@ -971,7 +914,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
 
 	if(!g_hWnd) return 1;
 
-	// Start worker
+
 	HANDLE hThread = CreateThread(NULL, 0, WorkerThread, pArgs, 0, NULL);
 	if(hThread) CloseHandle(hThread);
 

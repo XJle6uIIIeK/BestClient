@@ -1,7 +1,9 @@
 /* Copyright © 2026 BestProject Team */
 #include "translate.h"
 
+#include <base/dbg.h>
 #include <base/log.h>
+#include <base/str.h>
 #include <base/time.h>
 
 #include <engine/shared/json.h>
@@ -13,227 +15,88 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <memory>
 #include <string>
-#include <string_view>
 
-static bool UrlEncode(const char *pText, char *pOut, size_t Length)
+namespace
+{
+constexpr int64_t TRANSLATE_TIMEOUT = 20;
+
+void UrlEncode(const char *pText, char *pOut, size_t Length)
 {
 	if(!pText || Length == 0)
-		return false;
+		return;
 
 	size_t OutPos = 0;
-	for(const char *p = pText; *p; ++p)
+	for(const char *p = pText; *p && OutPos + 1 < Length; ++p)
 	{
-		const unsigned char c = *(const unsigned char *)p;
+		const unsigned char c = (unsigned char)*p;
 		if(isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
 		{
-			if(OutPos + 1 >= Length)
-			{
-				pOut[OutPos] = '\0';
-				return false;
-			}
 			pOut[OutPos++] = c;
 		}
 		else
 		{
 			if(OutPos + 3 >= Length)
-			{
-				pOut[OutPos] = '\0';
-				return false;
-			}
+				break;
 			snprintf(pOut + OutPos, 4, "%%%02X", c);
 			OutPos += 3;
 		}
 	}
 	pOut[OutPos] = '\0';
-	return true;
 }
 
-namespace
-{
 void NormalizeLanguageCode(const char *pLanguage, char *pOut, size_t Size)
 {
 	if(!pOut || Size == 0)
 		return;
 	pOut[0] = '\0';
-	if(!pLanguage || pLanguage[0] == '\0')
+	if(!pLanguage || !pLanguage[0])
 		return;
 
 	char aLower[32] = "";
-	int Out = 0;
-	for(const char *p = pLanguage; *p != '\0' && Out < (int)sizeof(aLower) - 1; ++p)
+	int Length = 0;
+	for(const char *p = pLanguage; *p && Length < (int)sizeof(aLower) - 1; ++p)
 	{
 		const unsigned char c = (unsigned char)*p;
-		if(c == '-' || c == '_' || c == ';' || c == ',' || c == '|' || std::isspace(c))
+		if(c == '-' || c == '_' || c == ';' || c == ',' || c == '|' || isspace(c))
 			break;
-		if(std::isalnum(c))
-			aLower[Out++] = (char)std::tolower(c);
+		if(isalnum(c))
+			aLower[Length++] = (char)tolower(c);
 	}
-	aLower[Out] = '\0';
-	if(aLower[0] == '\0')
-		return;
+	aLower[Length] = '\0';
 
-	const struct
+	struct SMapping
 	{
-		const char *m_pIn;
-		const char *m_pOut;
-	} aMappings[] = {
-		{"auto", "auto"},
-		{"ru", "ru"},
-		{"russian", "ru"},
-		{"en", "en"},
-		{"english", "en"},
-		{"de", "de"},
-		{"german", "de"},
-		{"fr", "fr"},
-		{"french", "fr"},
-		{"es", "es"},
-		{"spanish", "es"},
-		{"pl", "pl"},
-		{"polish", "pl"},
-		{"zh", "zh"},
-		{"cn", "zh"},
-		{"chinese", "zh"},
-		{"mandarin", "zh"},
-		{"pt", "pt"},
-		{"portuguese", "pt"},
-		{"brazilian", "pt"},
-		{"brasileiro", "pt"},
-		{"tr", "tr"},
-		{"turkish", "tr"},
+		const char *m_pFrom;
+		const char *m_pTo;
 	};
-
-	for(const auto &Mapping : aMappings)
+	static const SMapping s_aMappings[] = {
+		{"auto", "auto"},
+		{"ru", "ru"}, {"russian", "ru"},
+		{"en", "en"}, {"english", "en"},
+		{"de", "de"}, {"german", "de"},
+		{"fr", "fr"}, {"french", "fr"},
+		{"es", "es"}, {"spanish", "es"},
+		{"pl", "pl"}, {"polish", "pl"},
+		{"zh", "zh"}, {"cn", "zh"}, {"chinese", "zh"},
+		{"pt", "pt"}, {"portuguese", "pt"}, {"brazilian", "pt"},
+		{"tr", "tr"}, {"turkish", "tr"},
+	};
+	for(const SMapping &Mapping : s_aMappings)
 	{
-		if(str_comp(aLower, Mapping.m_pIn) == 0)
+		if(str_comp(aLower, Mapping.m_pFrom) == 0)
 		{
-			str_copy(pOut, Mapping.m_pOut, Size);
+			str_copy(pOut, Mapping.m_pTo, Size);
 			return;
 		}
 	}
 }
 
-std::string UrlDecode(std::string_view Encoded)
-{
-	std::string Decoded;
-	Decoded.reserve(Encoded.size());
-	for(size_t i = 0; i < Encoded.size(); ++i)
-	{
-		const char c = Encoded[i];
-		if(c == '%' && i + 2 < Encoded.size())
-		{
-			auto HexToInt = [](char Hex) -> int {
-				if(Hex >= '0' && Hex <= '9')
-					return Hex - '0';
-				if(Hex >= 'a' && Hex <= 'f')
-					return 10 + (Hex - 'a');
-				if(Hex >= 'A' && Hex <= 'F')
-					return 10 + (Hex - 'A');
-				return -1;
-			};
-			const int High = HexToInt(Encoded[i + 1]);
-			const int Low = HexToInt(Encoded[i + 2]);
-			if(High >= 0 && Low >= 0)
-			{
-				Decoded.push_back((char)((High << 4) | Low));
-				i += 2;
-				continue;
-			}
-		}
-		else if(c == '+')
-		{
-			Decoded.push_back(' ');
-			continue;
-		}
-		Decoded.push_back(c);
-	}
-	return Decoded;
-}
-
-void NormalizeTranslatedText(char *pText, size_t Size)
-{
-	if(!pText || Size == 0 || pText[0] == '\0')
-		return;
-
-	int EscapedSequenceCount = 0;
-	for(const char *p = pText; p[0] != '\0' && p[1] != '\0' && p[2] != '\0'; ++p)
-	{
-		if(p[0] == '%' && std::isxdigit((unsigned char)p[1]) && std::isxdigit((unsigned char)p[2]))
-			++EscapedSequenceCount;
-	}
-
-	if(EscapedSequenceCount == 0)
-		return;
-
-	const bool LooksEncoded = EscapedSequenceCount >= 2 || str_find(pText, "%20") || str_find(pText, "%3D") || str_find(pText, "%2F") || str_find(pText, "%3A");
-	if(!LooksEncoded)
-		return;
-
-	const std::string Decoded = UrlDecode(pText);
-	if(Decoded.empty() || str_comp(Decoded.c_str(), pText) == 0)
-		return;
-
-	str_copy(pText, Decoded.c_str(), Size);
-}
-
-void StripCommasAndPeriods(char *pText)
-{
-	char *pWrite = pText;
-	for(const char *pRead = pText; *pRead != '\0'; ++pRead)
-	{
-		if(*pRead != ',' && *pRead != '.')
-			*pWrite++ = *pRead;
-	}
-	*pWrite = '\0';
-}
-
 bool IsAutoLanguage(const char *pLanguage)
 {
-	return pLanguage == nullptr || pLanguage[0] == '\0' || str_comp_nocase(pLanguage, "auto") == 0;
-}
-
-bool HasUrlEncodedSequence(const char *pText)
-{
-	if(!pText)
-		return false;
-
-	for(const char *p = pText; p[0] != '\0' && p[1] != '\0' && p[2] != '\0'; ++p)
-	{
-		if(p[0] == '%' && std::isxdigit((unsigned char)p[1]) && std::isxdigit((unsigned char)p[2]))
-			return true;
-	}
-	return false;
-}
-
-bool SanitizeOutgoingTranslatedText(const char *pOriginalText, const char *pTranslatedText, char *pOut, size_t OutSize)
-{
-	if(!pOriginalText || !pOut || OutSize == 0)
-		return false;
-
-	pOut[0] = '\0';
-	if(!pTranslatedText || pTranslatedText[0] == '\0')
-		return false;
-
-	char aNormalized[1024];
-	str_copy(aNormalized, pTranslatedText, sizeof(aNormalized));
-	for(int i = 0; i < 2; ++i)
-	{
-		char aBefore[sizeof(aNormalized)];
-		str_copy(aBefore, aNormalized, sizeof(aBefore));
-		NormalizeTranslatedText(aNormalized, sizeof(aNormalized));
-		if(str_comp(aNormalized, aBefore) == 0)
-			break;
-	}
-
-	if(g_Config.m_BcTranslateOutgoingStripPunctuation)
-		StripCommasAndPeriods(aNormalized);
-
-	if(!str_utf8_check(aNormalized) || *str_utf8_skip_whitespaces(aNormalized) == '\0' || HasUrlEncodedSequence(aNormalized))
-		return false;
-
-	str_copy(pOut, aNormalized, OutSize);
-	return pOut[0] != '\0';
+	return !pLanguage || !pLanguage[0] || str_comp_nocase(pLanguage, "auto") == 0;
 }
 
 bool LanguagesEqual(const char *pA, const char *pB)
@@ -243,251 +106,170 @@ bool LanguagesEqual(const char *pA, const char *pB)
 	return str_comp_nocase(pA, pB) == 0;
 }
 
-void NormalizeDetectedLanguage(char *pLanguage, size_t Size)
+bool IsApostropheCodepoint(int Code)
 {
-	if(!pLanguage || Size == 0 || pLanguage[0] == '\0')
+	return Code == '\'' || Code == 0x2018 || Code == 0x2019 || Code == 0x02BC;
+}
+
+void StripApostrophesFromTranslatedText(char *pText)
+{
+	char *pWrite = pText;
+	const char *pRead = pText;
+	while(*pRead)
+	{
+		const char *pBefore = pRead;
+		const int Code = str_utf8_decode(&pRead);
+		if(Code < 0)
+			break;
+		if(IsApostropheCodepoint(Code))
+			continue;
+		while(pBefore < pRead)
+			*pWrite++ = *pBefore++;
+	}
+	*pWrite = '\0';
+}
+
+void NormalizeTranslatedText(char *pText, size_t Size)
+{
+	if(!pText || !pText[0])
 		return;
 
-	char aNormalized[16] = "";
-	NormalizeLanguageCode(pLanguage, aNormalized, sizeof(aNormalized));
-	str_copy(pLanguage, aNormalized, Size);
-}
-
-bool ExtractOutgoingChatPrefix(const CGameClient &GameClient, const char *pText, char *pPrefix, size_t PrefixSize, char *pBody, size_t BodySize)
-{
-	if(!pPrefix || PrefixSize == 0 || !pBody || BodySize == 0)
-		return false;
-	pPrefix[0] = '\0';
-	pBody[0] = '\0';
-	if(!pText || pText[0] == '\0')
-		return false;
-
-	const char *pColon = str_find(pText, ":");
-	if(!pColon || pColon == pText)
-		return false;
-
-	const int NameLength = (int)(pColon - pText);
-	const char *pBodyStart = pColon + 1;
-	while(*pBodyStart != '\0' && std::isspace((unsigned char)*pBodyStart))
-		++pBodyStart;
-	if(*pBodyStart == '\0')
-		return false;
-
-	for(const auto &Client : GameClient.m_aClients)
+	std::string Decoded;
+	bool HasEscape = false;
+	for(size_t i = 0; pText[i]; ++i)
 	{
-		if(!Client.m_Active || Client.m_aName[0] == '\0')
-			continue;
-		if(str_length(Client.m_aName) != NameLength)
-			continue;
-		char aNamePrefix[64] = "";
-		str_copy(aNamePrefix, std::string(pText, NameLength).c_str(), sizeof(aNamePrefix));
-		if(str_comp_nocase(Client.m_aName, aNamePrefix) != 0)
-			continue;
-
-		const int PrefixLength = (int)(pBodyStart - pText);
-		str_copy(pPrefix, std::string(pText, PrefixLength).c_str(), PrefixSize);
-		str_copy(pBody, pBodyStart, BodySize);
-		return true;
-	}
-
-	return false;
-}
-
-bool IsWhisperCommandToken(const char *pToken)
-{
-	return pToken != nullptr && (str_comp_nocase(pToken, "w") == 0 || str_comp_nocase(pToken, "whisper") == 0);
-}
-
-bool IsConverseCommandToken(const char *pToken)
-{
-	return pToken != nullptr && (str_comp_nocase(pToken, "c") == 0 || str_comp_nocase(pToken, "converse") == 0);
-}
-
-bool ExtractOutgoingCommand(const char *pText, char *pCommand, size_t CommandSize, const char **ppArguments)
-{
-	if(!pText || pText[0] != '/' || !pCommand || CommandSize == 0 || !ppArguments)
-		return false;
-
-	const char *pCommandStart = pText + 1;
-	while(*pCommandStart != '\0' && std::isspace((unsigned char)*pCommandStart))
-		++pCommandStart;
-	if(*pCommandStart == '\0')
-		return false;
-
-	const char *pCommandEnd = pCommandStart;
-	while(*pCommandEnd != '\0' && !std::isspace((unsigned char)*pCommandEnd))
-		++pCommandEnd;
-	str_truncate(pCommand, CommandSize, pCommandStart, pCommandEnd - pCommandStart);
-
-	const char *pArguments = pCommandEnd;
-	while(*pArguments != '\0' && std::isspace((unsigned char)*pArguments))
-		++pArguments;
-	*ppArguments = pArguments;
-	return true;
-}
-
-bool ExtractOutgoingWhisperPrefix(const CGameClient &GameClient, const char *pText, char *pPrefix, size_t PrefixSize, char *pBody, size_t BodySize)
-{
-	if(!pPrefix || PrefixSize == 0 || !pBody || BodySize == 0)
-		return false;
-	pPrefix[0] = '\0';
-	pBody[0] = '\0';
-	char aCommand[32] = "";
-	const char *pNameStart = nullptr;
-	if(!ExtractOutgoingCommand(pText, aCommand, sizeof(aCommand), &pNameStart))
-		return false;
-	if(!IsWhisperCommandToken(aCommand))
-		return false;
-	if(*pNameStart == '\0')
-		return false;
-
-	if(*pNameStart == '"')
-	{
-		const char *pNameEnd = pNameStart + 1;
-		while(*pNameEnd != '\0' && *pNameEnd != '"')
+		if(pText[i] == '%' && pText[i + 1] && pText[i + 2] && isxdigit((unsigned char)pText[i + 1]) && isxdigit((unsigned char)pText[i + 2]))
 		{
-			if(*pNameEnd == '\\' && (pNameEnd[1] == '\\' || pNameEnd[1] == '"'))
-				pNameEnd += 2;
-			else
-				++pNameEnd;
+			const char aHex[] = {pText[i + 1], pText[i + 2], '\0'};
+			Decoded.push_back((char)strtol(aHex, nullptr, 16));
+			HasEscape = true;
+			i += 2;
 		}
-		if(*pNameEnd != '"')
-			return false;
-
-		const char *pBodyStart = pNameEnd + 1;
-		if(*pBodyStart == '\0' || !std::isspace((unsigned char)*pBodyStart))
-			return false;
-		while(*pBodyStart != '\0' && std::isspace((unsigned char)*pBodyStart))
-			++pBodyStart;
-		if(*pBodyStart == '\0')
-			return false;
-
-		const int PrefixLength = (int)(pBodyStart - pText);
-		str_copy(pPrefix, std::string(pText, PrefixLength).c_str(), PrefixSize);
-		str_copy(pBody, pBodyStart, BodySize);
-		return true;
+		else if(pText[i] == '+')
+			Decoded.push_back(' ');
+		else
+			Decoded.push_back(pText[i]);
 	}
-
-	const char *pBestBodyStart = nullptr;
-	int BestNameLength = -1;
-	const int RemainingLength = str_length(pNameStart);
-	for(const auto &Client : GameClient.m_aClients)
-	{
-		if(!Client.m_Active || Client.m_aName[0] == '\0')
-			continue;
-
-		const int NameLength = str_length(Client.m_aName);
-		if(NameLength <= 0 || NameLength <= BestNameLength || NameLength >= RemainingLength)
-			continue;
-		char aNamePrefix[MAX_NAME_LENGTH] = "";
-		str_copy(aNamePrefix, std::string(pNameStart, NameLength).c_str(), sizeof(aNamePrefix));
-		if(str_comp_nocase(aNamePrefix, Client.m_aName) != 0)
-			continue;
-
-		const char *pAfterName = pNameStart + NameLength;
-		if(*pAfterName != '\0' && !std::isspace((unsigned char)*pAfterName))
-			continue;
-
-		const char *pMessageStart = pAfterName;
-		while(*pMessageStart != '\0' && std::isspace((unsigned char)*pMessageStart))
-			++pMessageStart;
-		if(*pMessageStart == '\0')
-			continue;
-
-		BestNameLength = NameLength;
-		pBestBodyStart = pMessageStart;
-	}
-
-	if(!pBestBodyStart)
-	{
-		// Target not in client list: first token = name, rest = message.
-		const char *pNameEnd = pNameStart;
-		while(*pNameEnd != '\0' && !std::isspace((unsigned char)*pNameEnd))
-			++pNameEnd;
-		if(pNameEnd == pNameStart || *pNameEnd == '\0')
-			return false;
-
-		const char *pMessageStart = pNameEnd;
-		while(*pMessageStart != '\0' && std::isspace((unsigned char)*pMessageStart))
-			++pMessageStart;
-		if(*pMessageStart == '\0')
-			return false;
-
-		pBestBodyStart = pMessageStart;
-	}
-
-	const int PrefixLength = (int)(pBestBodyStart - pText);
-	str_copy(pPrefix, std::string(pText, PrefixLength).c_str(), PrefixSize);
-	str_copy(pBody, pBestBodyStart, BodySize);
-	return true;
+	if(HasEscape)
+		str_copy(pText, Decoded.c_str(), Size);
 }
 
-bool ExtractOutgoingConversePrefix(const char *pText, char *pPrefix, size_t PrefixSize, char *pBody, size_t BodySize)
+bool ExtractOutgoingCommand(const char *pText, const char *pCommand, const char **ppArguments)
 {
-	if(!pPrefix || PrefixSize == 0 || !pBody || BodySize == 0)
+	if(!pText || pText[0] != '/' || !ppArguments)
 		return false;
-	pPrefix[0] = '\0';
-	pBody[0] = '\0';
-
-	char aCommand[32] = "";
-	const char *pBodyStart = nullptr;
-	if(!ExtractOutgoingCommand(pText, aCommand, sizeof(aCommand), &pBodyStart) || !IsConverseCommandToken(aCommand) || *pBodyStart == '\0')
+	const char *pStart = pText + 1;
+	const char *pEnd = pStart;
+	while(*pEnd && !isspace((unsigned char)*pEnd))
+		++pEnd;
+	if((size_t)(pEnd - pStart) != str_length(pCommand) || str_comp_nocase(std::string(pStart, pEnd - pStart).c_str(), pCommand) != 0)
 		return false;
-
-	const int PrefixLength = (int)(pBodyStart - pText);
-	str_copy(pPrefix, std::string(pText, PrefixLength).c_str(), PrefixSize);
-	str_copy(pBody, pBodyStart, BodySize);
-	return true;
+	const char *pArgumentsStart = pEnd;
+	while(isspace((unsigned char)*pArgumentsStart))
+		++pArgumentsStart;
+	*ppArguments = pArgumentsStart;
+	return *pArgumentsStart != '\0';
 }
 
 bool ExtractOutgoingTranslatableText(const CGameClient &GameClient, const char *pText, char *pPrefix, size_t PrefixSize, char *pBody, size_t BodySize)
 {
-	if(ExtractOutgoingWhisperPrefix(GameClient, pText, pPrefix, PrefixSize, pBody, BodySize))
-		return true;
-	if(ExtractOutgoingConversePrefix(pText, pPrefix, PrefixSize, pBody, BodySize))
-		return true;
-	if(pText && pText[0] == '/')
+	pPrefix[0] = '\0';
+	pBody[0] = '\0';
+	if(!pText || !pText[0])
 		return false;
-	return ExtractOutgoingChatPrefix(GameClient, pText, pPrefix, PrefixSize, pBody, BodySize);
-}
-}
 
-const char *ITranslateBackend::EncodeSource(const char *pSource) const
-{
-	return IsAutoLanguage(pSource) ? "auto" : pSource;
+	if(pText[0] == '/')
+	{
+		const char *pArguments = nullptr;
+		if(ExtractOutgoingCommand(pText, "c", &pArguments))
+		{
+			const int PrefixLength = (int)(pArguments - pText);
+			str_copy(pPrefix, std::string(pText, PrefixLength).c_str(), PrefixSize);
+			str_copy(pBody, pArguments, BodySize);
+			return pBody[0] != '\0';
+		}
+
+		if(ExtractOutgoingCommand(pText, "w", &pArguments) || ExtractOutgoingCommand(pText, "whisper", &pArguments))
+		{
+			const char *pBodyStart = str_find(pArguments, " ");
+			if(!pBodyStart)
+				return false;
+			while(isspace((unsigned char)*pBodyStart))
+				++pBodyStart;
+			if(!pBodyStart[0])
+				return false;
+			const int PrefixLength = (int)(pBodyStart - pText);
+			str_copy(pPrefix, std::string(pText, PrefixLength).c_str(), PrefixSize);
+			str_copy(pBody, pBodyStart, BodySize);
+			return true;
+		}
+		return false;
+	}
+
+	const char *pColon = str_find(pText, ":");
+	if(pColon && pColon != pText)
+	{
+		const int NameLength = (int)(pColon - pText);
+		for(const auto &Client : GameClient.m_aClients)
+		{
+			if(!Client.m_Active || str_length(Client.m_aName) != NameLength)
+				continue;
+			char aName[64] = "";
+			str_copy(aName, std::string(pText, NameLength).c_str(), sizeof(aName));
+			if(str_comp_nocase(Client.m_aName, aName) != 0)
+				continue;
+			const char *pBodyStart = pColon + 1;
+			while(isspace((unsigned char)*pBodyStart))
+				++pBodyStart;
+			if(!pBodyStart[0])
+				return false;
+			str_copy(pPrefix, std::string(pText, pBodyStart - pText).c_str(), PrefixSize);
+			str_copy(pBody, pBodyStart, BodySize);
+			return true;
+		}
+	}
+
+	str_copy(pBody, pText, BodySize);
+	return pBody[0] != '\0';
+}
 }
 
 const char *ITranslateBackend::EncodeTarget(const char *pTarget) const
 {
-	if(!pTarget || pTarget[0] == '\0')
-		return DefaultConfig::TcTranslateTarget;
-	return pTarget;
+	return pTarget && pTarget[0] ? pTarget : DefaultConfig::TcTranslateTarget;
 }
 
 class ITranslateBackendHttp : public ITranslateBackend
 {
 protected:
-	std::shared_ptr<CHttpRequest> m_pHttpRequest = nullptr;
+	using ITranslateBackend::ITranslateBackend;
+	std::shared_ptr<IHttpRequest> m_pHttpRequest;
 	virtual bool ParseResponse(CTranslateResponse &Out) = 0;
 	virtual bool ParseHttpError() const { return false; }
 
 	void CreateHttpRequest(IHttp &Http, const char *pUrl)
 	{
-		auto pGet = std::make_shared<CHttpRequest>(pUrl);
-		pGet->LogProgress(HTTPLOG::FAILURE);
-		pGet->FailOnErrorStatus(false);
-		pGet->Timeout(CTimeout{10000, 0, 500, 10});
+		auto pRequest = HttpGet(pUrl);
+		pRequest->LogProgress(HTTPLOG::FAILURE);
+		pRequest->FailOnErrorStatus(false);
+		pRequest->Timeout(CTimeout{20000, 0, 500, 10});
+		m_pHttpRequest = std::move(pRequest);
+		Http.Run(m_pHttpRequest);
+	}
 
-		m_pHttpRequest = pGet;
-		Http.Run(pGet);
+	void CreateHttpRequestPost(IHttp &Http, const char *pUrl, const char *pBody)
+	{
+		auto pRequest = HttpGet(pUrl);
+		pRequest->LogProgress(HTTPLOG::FAILURE);
+		pRequest->FailOnErrorStatus(false);
+		pRequest->Timeout(CTimeout{20000, 0, 500, 10});
+		pRequest->HeaderString("Content-Type", "application/x-www-form-urlencoded");
+		pRequest->Post((const unsigned char *)pBody, str_length(pBody));
+		m_pHttpRequest = std::move(pRequest);
+		Http.Run(m_pHttpRequest);
 	}
 
 public:
-	bool IsRateLimited() const override
-	{
-		return m_pHttpRequest && m_pHttpRequest->StatusCode() == 429;
-	}
-
 	std::optional<bool> Update(CTranslateResponse &Out) override
 	{
 		dbg_assert(m_pHttpRequest != nullptr, "m_pHttpRequest is nullptr");
@@ -510,6 +292,7 @@ public:
 		}
 		return ParseResponse(Out);
 	}
+
 	~ITranslateBackendHttp() override
 	{
 		if(m_pHttpRequest)
@@ -519,687 +302,542 @@ public:
 
 class CTranslateBackendLibretranslate : public ITranslateBackendHttp
 {
-private:
 	bool ParseResponseJson(const json_value *pObj, CTranslateResponse &Out)
 	{
-		if(!pObj)
+		if(!pObj || pObj->type != json_object)
 		{
-			str_copy(Out.m_Text, "Response is not JSON");
+			str_copy(Out.m_Text, "Response is not a JSON object");
 			return false;
 		}
-
-		if(pObj->type != json_object)
-		{
-			str_copy(Out.m_Text, "Response is not object");
-			return false;
-		}
-
 		const json_value *pError = json_object_get(pObj, "error");
 		if(pError != &json_value_none)
 		{
-			if(pError->type != json_string)
-				str_copy(Out.m_Text, "Error is not string");
-			else
+			if(pError->type == json_string)
 				str_copy(Out.m_Text, pError->u.string.ptr);
+			else
+				str_copy(Out.m_Text, "LibreTranslate error");
 			return false;
 		}
-
-		const json_value *pTranslatedText = json_object_get(pObj, "translatedText");
-		if(pTranslatedText == &json_value_none)
+		const json_value *pTranslated = json_object_get(pObj, "translatedText");
+		if(pTranslated == &json_value_none || pTranslated->type != json_string)
 		{
 			str_copy(Out.m_Text, "No translatedText");
 			return false;
 		}
-		if(pTranslatedText->type != json_string)
+		str_copy(Out.m_Text, pTranslated->u.string.ptr);
+		const json_value *pDetected = json_object_get(pObj, "detectedLanguage");
+		if(pDetected != &json_value_none && pDetected->type == json_object)
 		{
-			str_copy(Out.m_Text, "translatedText is not string");
-			return false;
+			const json_value *pLanguage = json_object_get(pDetected, "language");
+			if(pLanguage != &json_value_none && pLanguage->type == json_string)
+				str_copy(Out.m_Language, pLanguage->u.string.ptr);
 		}
-
-		const json_value *pDetectedLanguage = json_object_get(pObj, "detectedLanguage");
-		if(pDetectedLanguage == &json_value_none)
-		{
-			str_copy(Out.m_Text, "No pDetectedLanguage");
-			return false;
-		}
-		if(pDetectedLanguage->type != json_object)
-		{
-			str_copy(Out.m_Text, "pDetectedLanguage is not object");
-			return false;
-		}
-
-		const json_value *pConfidence = json_object_get(pDetectedLanguage, "confidence");
-		if(pConfidence == &json_value_none || ((pConfidence->type == json_double && pConfidence->u.dbl == 0.0f) ||
-							      (pConfidence->type == json_integer && pConfidence->u.integer == 0)))
-		{
-			str_copy(Out.m_Text, "Unknown language");
-			return false;
-		}
-
-		const json_value *pLanguage = json_object_get(pDetectedLanguage, "language");
-		if(pLanguage == &json_value_none)
-		{
-			str_copy(Out.m_Text, "No language");
-			return false;
-		}
-		if(pLanguage->type != json_string)
-		{
-			str_copy(Out.m_Text, "language is not string");
-			return false;
-		}
-
-		str_copy(Out.m_Text, pTranslatedText->u.string.ptr);
 		NormalizeTranslatedText(Out.m_Text, sizeof(Out.m_Text));
-		str_copy(Out.m_Language, pLanguage->u.string.ptr);
-		NormalizeDetectedLanguage(Out.m_Language, sizeof(Out.m_Language));
-
-		return true;
+		return Out.m_Text[0] != '\0';
 	}
 
-protected:
 	bool ParseResponse(CTranslateResponse &Out) override
 	{
 		json_value *pObj = m_pHttpRequest->ResultJson();
-		bool Res = ParseResponseJson(pObj, Out);
+		const bool Result = ParseResponseJson(pObj, Out);
 		json_value_free(pObj);
-		return Res;
+		return Result;
 	}
+
 	bool ParseHttpError() const override { return true; }
 
 public:
-	const char *Name() const override
+	CTranslateBackendLibretranslate(IHttp &Http, const char *pText, const char *pSource, const char *pTarget, const char *pName) :
+		ITranslateBackendHttp(pName)
 	{
-		return "LibreTranslate";
-	}
-	CTranslateBackendLibretranslate(IHttp &Http, const char *pText, const char *pSourceLanguage, const char *pTargetLanguage)
-	{
-		CJsonStringWriter Json = CJsonStringWriter();
+		CJsonStringWriter Json;
 		Json.BeginObject();
 		Json.WriteAttribute("q");
 		Json.WriteStrValue(pText);
 		Json.WriteAttribute("source");
-		Json.WriteStrValue(EncodeSource(pSourceLanguage));
+		Json.WriteStrValue(IsAutoLanguage(pSource) ? "auto" : pSource);
 		Json.WriteAttribute("target");
-		Json.WriteStrValue(EncodeTarget(pTargetLanguage));
+		Json.WriteStrValue(EncodeTarget(pTarget));
 		Json.WriteAttribute("format");
 		Json.WriteStrValue("text");
-		if(g_Config.m_TcTranslateKey[0] != '\0')
+		if(g_Config.m_TcTranslateKey[0])
 		{
 			Json.WriteAttribute("api_key");
 			Json.WriteStrValue(g_Config.m_TcTranslateKey);
 		}
 		Json.EndObject();
-		CreateHttpRequest(Http, g_Config.m_TcTranslateEndpoint[0] == '\0' ? "localhost:5000/translate" : g_Config.m_TcTranslateEndpoint);
-		const std::string JsonStr = Json.GetOutputString();
-		m_pHttpRequest->PostJson(JsonStr.c_str());
+		CreateHttpRequest(Http, g_Config.m_TcTranslateEndpoint[0] ? g_Config.m_TcTranslateEndpoint : "localhost:5000/translate");
+		m_pHttpRequest->PostJson(Json.GetOutputString().c_str());
 	}
 };
 
-class CTranslateBackendFtapi : public ITranslateBackendHttp
+class CTranslateBackendDeepL : public ITranslateBackendHttp
 {
-private:
-	bool ParseResponseJson(const json_value *pObj, CTranslateResponse &Out)
+	static void EncodeDeepLLanguage(const char *pLanguage, char *pOut, size_t Size, bool Target)
 	{
-		if(!pObj)
+		if(!pOut || Size == 0)
+			return;
+		pOut[0] = '\0';
+		char aNorm[16] = "";
+		NormalizeLanguageCode(pLanguage, aNorm, sizeof(aNorm));
+		if(!aNorm[0] || str_comp(aNorm, "auto") == 0)
+			return;
+		if(str_comp(aNorm, "en") == 0)
 		{
-			str_copy(Out.m_Text, "Response is not JSON");
-			return false;
-		}
-
-		if(pObj->type != json_object)
-		{
-			str_copy(Out.m_Text, "Response is not object");
-			return false;
-		}
-
-		const json_value *pTranslatedText = json_object_get(pObj, "destination-text");
-		if(pTranslatedText == &json_value_none)
-		{
-			str_copy(Out.m_Text, "No destination-text");
-			return false;
-		}
-		if(pTranslatedText->type != json_string)
-		{
-			str_copy(Out.m_Text, "destination-text is not string");
-			return false;
-		}
-
-		const json_value *pDetectedLanguage = json_object_get(pObj, "source-language");
-		if(pDetectedLanguage == &json_value_none)
-		{
-			str_copy(Out.m_Text, "No source-language");
-			return false;
-		}
-		if(pDetectedLanguage->type != json_string)
-		{
-			str_copy(Out.m_Text, "source-language is not string");
-			return false;
-		}
-
-		str_copy(Out.m_Text, pTranslatedText->u.string.ptr);
-		NormalizeTranslatedText(Out.m_Text, sizeof(Out.m_Text));
-		str_copy(Out.m_Language, pDetectedLanguage->u.string.ptr);
-		NormalizeDetectedLanguage(Out.m_Language, sizeof(Out.m_Language));
-
-		return true;
-	}
-
-protected:
-	bool ParseResponse(CTranslateResponse &Out) override
-	{
-		json_value *pObj = m_pHttpRequest->ResultJson();
-		bool Res = ParseResponseJson(pObj, Out);
-		json_value_free(pObj);
-		return Res;
-	}
-
-public:
-	const char *EncodeTarget(const char *pTarget) const override
-	{
-		if(!pTarget || pTarget[0] == '\0')
-			return DefaultConfig::TcTranslateTarget;
-		if(str_comp_nocase(pTarget, "zh") == 0)
-			return "zh-cn";
-		return pTarget;
-	}
-	const char *Name() const override
-	{
-		return "FreeTranslateAPI";
-	}
-	CTranslateBackendFtapi(IHttp &Http, const char *pText, const char *pTargetLanguage)
-	{
-		char aBuf[4096];
-		const int PrefixLen = str_format(aBuf, sizeof(aBuf), "%s/translate?dl=%s&text=",
-			g_Config.m_TcTranslateEndpoint[0] != '\0' ? g_Config.m_TcTranslateEndpoint : "https://ftapi.pythonanywhere.com",
-			EncodeTarget(pTargetLanguage));
-		if(PrefixLen < 0 || PrefixLen >= (int)sizeof(aBuf) ||
-			!UrlEncode(pText, aBuf + PrefixLen, sizeof(aBuf) - PrefixLen))
-		{
-			log_error("translate", "FreeTranslateAPI: failed to build request URL");
-			CreateHttpRequest(Http, "https://ftapi.pythonanywhere.com/translate?dl=en&text=");
+			str_copy(pOut, Target ? "EN-US" : "EN", Size);
 			return;
 		}
-		CreateHttpRequest(Http, aBuf);
+		if(str_comp(aNorm, "pt") == 0)
+		{
+			str_copy(pOut, "PT-BR", Size);
+			return;
+		}
+		if(str_comp(aNorm, "uk") == 0)
+		{
+			str_copy(pOut, "UK", Size);
+			return;
+		}
+		if(str_comp(aNorm, "no") == 0)
+		{
+			str_copy(pOut, "NB", Size);
+			return;
+		}
+		if(str_length(aNorm) >= 2)
+		{
+			pOut[0] = (char)toupper((unsigned char)aNorm[0]);
+			pOut[1] = (char)toupper((unsigned char)aNorm[1]);
+			pOut[2] = '\0';
+		}
+	}
+
+	bool ParseResponse(CTranslateResponse &Out) override
+	{
+		json_value *pRoot = m_pHttpRequest->ResultJson();
+		if(!pRoot || pRoot->type != json_object)
+		{
+			str_copy(Out.m_Text, "Unexpected response format");
+			json_value_free(pRoot);
+			return false;
+		}
+		const json_value *pMessage = json_object_get(pRoot, "message");
+		if(pMessage != &json_value_none && pMessage->type == json_string)
+		{
+			str_copy(Out.m_Text, pMessage->u.string.ptr);
+			json_value_free(pRoot);
+			return false;
+		}
+		const json_value *pTranslations = json_object_get(pRoot, "translations");
+		if(pTranslations == &json_value_none || pTranslations->type != json_array || json_array_length(pTranslations) < 1)
+		{
+			str_copy(Out.m_Text, "No translations");
+			json_value_free(pRoot);
+			return false;
+		}
+		const json_value *pEntry = json_array_get(pTranslations, 0);
+		if(!pEntry || pEntry->type != json_object)
+		{
+			str_copy(Out.m_Text, "Invalid translation entry");
+			json_value_free(pRoot);
+			return false;
+		}
+		const json_value *pText = json_object_get(pEntry, "text");
+		if(pText == &json_value_none || pText->type != json_string)
+		{
+			str_copy(Out.m_Text, "No translation text");
+			json_value_free(pRoot);
+			return false;
+		}
+		str_copy(Out.m_Text, pText->u.string.ptr);
+		const json_value *pDetected = json_object_get(pEntry, "detected_source_language");
+		if(pDetected != &json_value_none && pDetected->type == json_string)
+			str_copy(Out.m_Language, pDetected->u.string.ptr);
+		NormalizeTranslatedText(Out.m_Text, sizeof(Out.m_Text));
+		json_value_free(pRoot);
+		return Out.m_Text[0] != '\0';
+	}
+
+	bool ParseHttpError() const override { return true; }
+
+public:
+	CTranslateBackendDeepL(IHttp &Http, const char *pText, const char *pSource, const char *pTarget, const char *pName) :
+		ITranslateBackendHttp(pName)
+	{
+		char aTarget[16] = "";
+		char aSource[16] = "";
+		EncodeDeepLLanguage(pTarget, aTarget, sizeof(aTarget), true);
+		EncodeDeepLLanguage(pSource, aSource, sizeof(aSource), false);
+		if(!aTarget[0])
+		{
+			str_copy(aTarget, "EN-US", sizeof(aTarget));
+		}
+
+		CJsonStringWriter Json;
+		Json.BeginObject();
+		Json.WriteAttribute("text");
+		Json.BeginArray();
+		Json.WriteStrValue(pText);
+		Json.EndArray();
+		if(aSource[0])
+		{
+			Json.WriteAttribute("source_lang");
+			Json.WriteStrValue(aSource);
+		}
+		Json.WriteAttribute("target_lang");
+		Json.WriteStrValue(aTarget);
+		Json.EndObject();
+
+		CreateHttpRequest(Http, g_Config.m_TcTranslateEndpoint[0] ? g_Config.m_TcTranslateEndpoint : "https://api-free.deepl.com/v2/translate");
+		if(g_Config.m_TcTranslateKey[0])
+		{
+			char aAuth[280];
+			str_format(aAuth, sizeof(aAuth), "DeepL-Auth-Key %s", g_Config.m_TcTranslateKey);
+			m_pHttpRequest->HeaderString("Authorization", aAuth);
+		}
+		m_pHttpRequest->PostJson(Json.GetOutputString().c_str());
 	}
 };
 
 class CTranslateBackendGoogle : public ITranslateBackendHttp
 {
-protected:
 	bool ParseResponse(CTranslateResponse &Out) override
 	{
 		json_value *pRoot = m_pHttpRequest->ResultJson();
-		if(!pRoot)
+		if(!pRoot || pRoot->type != json_array || json_array_length(pRoot) < 3)
 		{
-			str_copy(Out.m_Text, "Response is not JSON");
+			str_copy(Out.m_Text, "Unexpected response format");
+			json_value_free(pRoot);
 			return false;
 		}
-
-		bool Success = false;
-		if(pRoot->type != json_array)
+		const json_value *pSentences = json_array_get(pRoot, 0);
+		char aText[sizeof(Out.m_Text)] = "";
+		if(pSentences && pSentences->type == json_array)
 		{
-			str_copy(Out.m_Text, "Response is not array");
-		}
-		else
-		{
-			const json_value *pSentences = json_array_get(pRoot, 0);
-			if(!pSentences || pSentences->type != json_array)
+			for(int i = 0; i < json_array_length(pSentences); ++i)
 			{
-				str_copy(Out.m_Text, "Missing translation entries");
-			}
-			else
-			{
-				std::string Result;
-				for(int i = 0; i < json_array_length(pSentences); ++i)
-				{
-					const json_value *pSentence = json_array_get(pSentences, i);
-					if(!pSentence || pSentence->type != json_array)
-						continue;
-
-					const json_value *pTranslated = json_array_get(pSentence, 0);
-					if(!pTranslated || pTranslated->type != json_string)
-						continue;
-
-					Result += pTranslated->u.string.ptr;
-				}
-
-				if(Result.empty())
-				{
-					str_copy(Out.m_Text, "Translation is empty");
-				}
-				else
-				{
-					str_copy(Out.m_Text, Result.c_str(), sizeof(Out.m_Text));
-					NormalizeTranslatedText(Out.m_Text, sizeof(Out.m_Text));
-					const json_value *pDetectedLanguage = json_array_get(pRoot, 2);
-					if(pDetectedLanguage && pDetectedLanguage->type == json_string)
-						str_copy(Out.m_Language, pDetectedLanguage->u.string.ptr, sizeof(Out.m_Language));
-					NormalizeDetectedLanguage(Out.m_Language, sizeof(Out.m_Language));
-					Success = true;
-				}
+				const json_value *pSentence = json_array_get(pSentences, i);
+				if(!pSentence || pSentence->type != json_array)
+					continue;
+				const json_value *pTranslated = json_array_get(pSentence, 0);
+				if(pTranslated && pTranslated->type == json_string)
+					str_append(aText, pTranslated->u.string.ptr);
 			}
 		}
-
+		const json_value *pLanguage = json_array_get(pRoot, 2);
+		if(pLanguage && pLanguage->type == json_string)
+			str_copy(Out.m_Language, pLanguage->u.string.ptr);
+		str_copy(Out.m_Text, aText[0] ? aText : "Empty translation");
+		NormalizeTranslatedText(Out.m_Text, sizeof(Out.m_Text));
 		json_value_free(pRoot);
-		return Success;
+		return aText[0] != '\0';
 	}
 
 public:
-	const char *Name() const override
+	CTranslateBackendGoogle(IHttp &Http, const char *pText, const char *pSource, const char *pTarget, const char *pName) :
+		ITranslateBackendHttp(pName)
 	{
-		return "Google Translate";
-	}
-
-	CTranslateBackendGoogle(IHttp &Http, const char *pText, const char *pSourceLanguage, const char *pTargetLanguage)
-	{
-		char aBuf[4096];
-		const int PrefixLen = str_format(aBuf, sizeof(aBuf), "https://translate.google.com/translate_a/single?client=gtx&sl=%s&tl=%s&dt=t&q=",
-			EncodeSource(pSourceLanguage), EncodeTarget(pTargetLanguage));
-		if(PrefixLen < 0 || PrefixLen >= (int)sizeof(aBuf) ||
-			!UrlEncode(pText, aBuf + PrefixLen, sizeof(aBuf) - PrefixLen))
-		{
-			log_error("translate", "Google Translate: failed to build request URL");
-			CreateHttpRequest(Http, "https://translate.google.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=");
-			return;
-		}
-		CreateHttpRequest(Http, aBuf);
+		char aBody[4096];
+		str_format(aBody, sizeof(aBody), "client=gtx&sl=%s&dt=t&tl=%s&q=", IsAutoLanguage(pSource) ? "auto" : pSource, EncodeTarget(pTarget));
+		UrlEncode(pText, aBody + str_length(aBody), sizeof(aBody) - str_length(aBody));
+		CreateHttpRequestPost(Http,
+			g_Config.m_TcTranslateEndpoint[0] ? g_Config.m_TcTranslateEndpoint : "https://translate.googleapis.com/translate_a/single",
+			aBody);
 	}
 };
 
-void CTranslate::ConTranslate(IConsole::IResult *pResult, void *pUserData)
+static const std::vector<STranslateLanguage> s_vGoogleLanguages = {
+	{"Arabic", "ar"}, {"Bulgarian", "bg"}, {"Chinese (Simplified)", "zh"}, {"Chinese (Traditional)", "zh-TW"},
+	{"Croatian", "hr"}, {"Czech", "cs"}, {"Danish", "da"}, {"Dutch", "nl"}, {"English", "en"},
+	{"Estonian", "et"}, {"Finnish", "fi"}, {"French", "fr"}, {"German", "de"}, {"Greek", "el"},
+	{"Hebrew", "he"}, {"Hindi", "hi"}, {"Hungarian", "hu"}, {"Indonesian", "id"}, {"Italian", "it"},
+	{"Japanese", "ja"}, {"Korean", "ko"}, {"Latvian", "lv"}, {"Lithuanian", "lt"}, {"Norwegian", "no"},
+	{"Persian", "fa"}, {"Polish", "pl"}, {"Portuguese", "pt"}, {"Romanian", "ro"}, {"Russian", "ru"},
+	{"Serbian", "sr"}, {"Slovak", "sk"}, {"Slovenian", "sl"}, {"Spanish", "es"}, {"Swedish", "sv"},
+	{"Thai", "th"}, {"Turkish", "tr"}, {"Ukrainian", "uk"}, {"Vietnamese", "vi"},
+};
+
+static const std::vector<STranslateLanguage> s_vLibretranslateLanguages = {
+	{"Arabic", "ar"}, {"Chinese (Simplified)", "zh"}, {"Czech", "cs"}, {"Dutch", "nl"}, {"English", "en"},
+	{"Finnish", "fi"}, {"French", "fr"}, {"German", "de"}, {"Greek", "el"}, {"Hebrew", "he"},
+	{"Hindi", "hi"}, {"Hungarian", "hu"}, {"Indonesian", "id"}, {"Italian", "it"}, {"Japanese", "ja"},
+	{"Korean", "ko"}, {"Polish", "pl"}, {"Portuguese", "pt"}, {"Russian", "ru"}, {"Spanish", "es"},
+	{"Swedish", "sv"}, {"Turkish", "tr"}, {"Ukrainian", "uk"}, {"Vietnamese", "vi"},
+};
+
+static const std::vector<STranslateLanguage> s_vDeepLLanguages = {
+	{"Arabic", "ar"}, {"Bulgarian", "bg"}, {"Chinese (Simplified)", "zh"}, {"Czech", "cs"}, {"Danish", "da"},
+	{"Dutch", "nl"}, {"English", "en"}, {"Estonian", "et"}, {"Finnish", "fi"}, {"French", "fr"},
+	{"German", "de"}, {"Greek", "el"}, {"Hungarian", "hu"}, {"Indonesian", "id"}, {"Italian", "it"},
+	{"Japanese", "ja"}, {"Korean", "ko"}, {"Latvian", "lv"}, {"Lithuanian", "lt"}, {"Norwegian", "no"},
+	{"Polish", "pl"}, {"Portuguese", "pt"}, {"Romanian", "ro"}, {"Russian", "ru"}, {"Slovak", "sk"},
+	{"Slovenian", "sl"}, {"Spanish", "es"}, {"Swedish", "sv"}, {"Turkish", "tr"}, {"Ukrainian", "uk"},
+};
+
+const std::array<STranslateBackendInfo, 3> g_aTranslateBackends = {{
+	{"google", "Google", s_vGoogleLanguages, false},
+	{"libretranslate", "LibreTranslate", s_vLibretranslateLanguages, true},
+	{"deepl", "DeepL", s_vDeepLLanguages, true},
+}};
+
+int TranslateLanguageIndex(const std::vector<STranslateLanguage> &vLanguages, const char *pCode)
 {
-	const char *pName;
-	if(pResult->NumArguments() == 0)
-		pName = nullptr;
-	else
-		pName = pResult->GetString(0);
-
-	CTranslate *pThis = static_cast<CTranslate *>(pUserData);
-	pThis->Translate(pName);
-}
-
-void CTranslate::ConTranslateId(IConsole::IResult *pResult, void *pUserData)
-{
-	CTranslate *pThis = static_cast<CTranslate *>(pUserData);
-	pThis->Translate(pResult->GetInteger(0));
-}
-
-void CTranslate::ConToggleTranslate(IConsole::IResult *pResult, void *pUserData)
-{
-	CTranslate *pThis = static_cast<CTranslate *>(pUserData);
-	const int NewValue = g_Config.m_TcTranslateAutoIncoming ^ 1;
-	g_Config.m_TcTranslateAutoIncoming = NewValue;
-	g_Config.m_TcTranslateAutoOutgoing = NewValue;
-	pThis->GameClient()->m_Chat.Echo(NewValue ? Localize("Translation enabled") : Localize("Translation disabled"));
-}
-
-void CTranslate::OnConsoleInit()
-{
-	// Migration from legacy single toggle (tc_translate_auto) to separate toggles.
-	if(g_Config.m_TcTranslateAuto && !g_Config.m_TcTranslateAutoIncoming && !g_Config.m_TcTranslateAutoOutgoing)
-	{
-		g_Config.m_TcTranslateAutoIncoming = 1;
-		g_Config.m_TcTranslateAutoOutgoing = 1;
-		g_Config.m_TcTranslateAuto = 0;
-	}
-
-	// Migration: target language can no longer be "auto".
-	if(IsAutoLanguage(g_Config.m_TcTranslateTarget))
-		str_copy(g_Config.m_TcTranslateTarget, DefaultConfig::TcTranslateTarget, sizeof(g_Config.m_TcTranslateTarget));
-	if(IsAutoLanguage(g_Config.m_BcTranslateOutgoingTarget))
-		str_copy(g_Config.m_BcTranslateOutgoingTarget, DefaultConfig::BcTranslateOutgoingTarget, sizeof(g_Config.m_BcTranslateOutgoingTarget));
-
-	Console()->Register("translate", "?r[name]", CFGFLAG_CLIENT, ConTranslate, this, "Translate last message (of a given name)");
-	Console()->Register("translate_id", "v[id]", CFGFLAG_CLIENT, ConTranslateId, this, "Translate last message of the person with this id");
-	Console()->Register("toggle_translate", "", CFGFLAG_CLIENT, ConToggleTranslate, this, "Toggle auto-translate incoming and outgoing chat");
+	for(size_t i = 0; i < vLanguages.size(); ++i)
+		if(str_comp_nocase(pCode, vLanguages[i].m_pCode) == 0)
+			return (int)i;
+	for(size_t i = 0; i < vLanguages.size(); ++i)
+		if(str_comp_nocase("en", vLanguages[i].m_pCode) == 0)
+			return (int)i;
+	return 0;
 }
 
 std::unique_ptr<ITranslateBackend> CTranslate::CreateBackend(const char *pText, const char *pSourceLanguage, const char *pTargetLanguage) const
 {
 	if(IsAutoLanguage(pTargetLanguage))
 		return nullptr;
-
-	if(str_comp_nocase(g_Config.m_TcTranslateBackend, "libretranslate") == 0)
-		return std::make_unique<CTranslateBackendLibretranslate>(*Http(), pText, pSourceLanguage, pTargetLanguage);
-	if(str_comp_nocase(g_Config.m_TcTranslateBackend, "ftapi") == 0)
-		return std::make_unique<CTranslateBackendFtapi>(*Http(), pText, pTargetLanguage);
-	if(str_comp_nocase(g_Config.m_TcTranslateBackend, "google") == 0)
-		return std::make_unique<CTranslateBackendGoogle>(*Http(), pText, pSourceLanguage, pTargetLanguage);
+	for(const STranslateBackendInfo &Backend : g_aTranslateBackends)
+	{
+		if(str_comp_nocase(g_Config.m_TcTranslateBackend, Backend.m_pValue) != 0)
+			continue;
+		if(str_comp_nocase(Backend.m_pValue, "google") == 0)
+			return std::make_unique<CTranslateBackendGoogle>(*Http(), pText, pSourceLanguage, pTargetLanguage, Backend.m_pName);
+		if(str_comp_nocase(Backend.m_pValue, "deepl") == 0)
+			return std::make_unique<CTranslateBackendDeepL>(*Http(), pText, pSourceLanguage, pTargetLanguage, Backend.m_pName);
+		if(str_comp_nocase(Backend.m_pValue, "libretranslate") == 0)
+			return std::make_unique<CTranslateBackendLibretranslate>(*Http(), pText, pSourceLanguage, pTargetLanguage, Backend.m_pName);
+	}
 	return nullptr;
 }
 
-const char *CTranslate::IncomingSourceLanguage() const
-{
-	return g_Config.m_BcTranslateIncomingSource;
-}
-
-const char *CTranslate::IncomingTargetLanguage() const
-{
-	if(IsAutoLanguage(g_Config.m_TcTranslateTarget))
-		return DefaultConfig::TcTranslateTarget;
-	return g_Config.m_TcTranslateTarget;
-}
-
-const char *CTranslate::OutgoingSourceLanguage() const
-{
-	return g_Config.m_BcTranslateOutgoingSource;
-}
-
-const char *CTranslate::OutgoingTargetLanguage() const
-{
-	if(IsAutoLanguage(g_Config.m_BcTranslateOutgoingTarget))
-		return DefaultConfig::BcTranslateOutgoingTarget;
-	return g_Config.m_BcTranslateOutgoingTarget;
-}
+const char *CTranslate::IncomingSourceLanguage() const { return g_Config.m_BcTranslateIncomingSource; }
+const char *CTranslate::IncomingTargetLanguage() const { return g_Config.m_TcTranslateTarget; }
+const char *CTranslate::OutgoingSourceLanguage() const { return g_Config.m_BcTranslateOutgoingSource; }
+const char *CTranslate::OutgoingTargetLanguage() const { return g_Config.m_BcTranslateOutgoingTarget; }
 
 bool CTranslate::IsIgnoredIncomingLanguage(const char *pLanguage) const
 {
-	if(!pLanguage || pLanguage[0] == '\0' || g_Config.m_BcTranslateIncomingIgnoreLanguages[0] == '\0')
-		return false;
-
 	char aLanguage[16] = "";
 	NormalizeLanguageCode(pLanguage, aLanguage, sizeof(aLanguage));
-	if(aLanguage[0] == '\0' || str_comp(aLanguage, "auto") == 0)
+	if(!aLanguage[0] || str_comp(aLanguage, "auto") == 0)
 		return false;
 
 	const char *pToken = g_Config.m_BcTranslateIncomingIgnoreLanguages;
-	while(*pToken != '\0')
+	while(*pToken)
 	{
-		while(*pToken != '\0' && (*pToken == ';' || *pToken == ',' || *pToken == '|' || std::isspace((unsigned char)*pToken)))
+		while(*pToken && (*pToken == ';' || *pToken == ',' || *pToken == '|' || isspace((unsigned char)*pToken)))
 			++pToken;
-		if(*pToken == '\0')
-			break;
-
-		const char *pTokenEnd = pToken;
-		while(*pTokenEnd != '\0' && *pTokenEnd != ';' && *pTokenEnd != ',' && *pTokenEnd != '|' && !std::isspace((unsigned char)*pTokenEnd))
-			++pTokenEnd;
-
+		const char *pEnd = pToken;
+		while(*pEnd && *pEnd != ';' && *pEnd != ',' && *pEnd != '|' && !isspace((unsigned char)*pEnd))
+			++pEnd;
 		char aToken[32] = "";
-		str_copy(aToken, std::string(pToken, pTokenEnd - pToken).c_str(), sizeof(aToken));
-		char aNormalizedToken[16] = "";
-		NormalizeLanguageCode(aToken, aNormalizedToken, sizeof(aNormalizedToken));
-		if(aNormalizedToken[0] != '\0' && str_comp(aLanguage, aNormalizedToken) == 0)
+		str_copy(aToken, std::string(pToken, pEnd - pToken).c_str(), sizeof(aToken));
+		char aNormalized[16] = "";
+		NormalizeLanguageCode(aToken, aNormalized, sizeof(aNormalized));
+		if(aNormalized[0] && str_comp(aLanguage, aNormalized) == 0)
 			return true;
-
-		pToken = pTokenEnd;
+		pToken = pEnd;
 	}
-
 	return false;
 }
 
 bool CTranslate::ShouldTranslateOutgoingChat(const char *pText) const
 {
-	if(!g_Config.m_TcTranslateAutoOutgoing || !pText || pText[0] == '\0')
+	if(!g_Config.m_TcTranslateAutoOutgoing || !pText || !pText[0])
 		return false;
 	if(pText[0] == '/')
 	{
-		char aPrefix[MAX_LINE_LENGTH] = "";
-		char aBody[MAX_LINE_LENGTH] = "";
+		char aPrefix[MAX_CHAT_LENGTH] = "";
+		char aBody[MAX_CHAT_LENGTH] = "";
 		if(!ExtractOutgoingTranslatableText(*GameClient(), pText, aPrefix, sizeof(aPrefix), aBody, sizeof(aBody)))
 			return false;
 	}
-	if(IsAutoLanguage(OutgoingTargetLanguage()))
-		return false;
-	if(LanguagesEqual(OutgoingSourceLanguage(), OutgoingTargetLanguage()))
-		return false;
-	return true;
-}
-
-bool CTranslate::HasPendingJobs() const
-{
-	return !m_vJobs.empty();
+	return !IsAutoLanguage(OutgoingTargetLanguage()) && !LanguagesEqual(OutgoingSourceLanguage(), OutgoingTargetLanguage());
 }
 
 bool CTranslate::CanStartRequest() const
 {
-	const int64_t Now = time();
-	if(Now < m_NextRequestTime || Now < m_RateLimitUntil)
+	if(time() < m_NextRequestTime)
 		return false;
-
 	int ActiveRequests = 0;
 	for(const CTranslateJob &Job : m_vJobs)
 		ActiveRequests += Job.m_pBackend != nullptr;
 	return ActiveRequests < 2;
 }
 
-void CTranslate::Translate(int Id, bool ShowProgress)
+void CTranslate::TranslateLine(CChat::CLine &Line, bool RespectIgnoredIncomingLanguages)
 {
-	if(Id < 0 || Id >= (int)std::size(GameClient()->m_aClients))
-	{
-		GameClient()->m_Chat.Echo(Localize("Not a valid ID"));
+	if(m_vJobs.size() >= 16 || !CanStartRequest())
 		return;
-	}
-	const auto &Player = GameClient()->m_aClients[Id];
-	if(!Player.m_Active)
-	{
-		GameClient()->m_Chat.Echo(Localize("ID not connected"));
+	auto pBackend = CreateBackend(Line.m_aText, IncomingSourceLanguage(), IncomingTargetLanguage());
+	if(!pBackend)
 		return;
-	}
-	Translate(Player.m_aName, ShowProgress);
-}
-
-void CTranslate::Translate(const char *pName, bool ShowProgress)
-{
-	CChat::CLine *pLineBest = nullptr;
-	if(GameClient()->m_Chat.m_CurrentLine > 0)
-	{
-		int ScoreBest = -1;
-		for(int i = 0; i < CChat::MAX_LINES; i++)
-		{
-			CChat::CLine *pLine = &GameClient()->m_Chat.m_aLines[((GameClient()->m_Chat.m_CurrentLine - i) + CChat::MAX_LINES) % CChat::MAX_LINES];
-			if(pLine->m_pTranslateResponse != nullptr)
-				continue;
-			if(pLine->m_ClientId == CChat::CLIENT_MSG)
-				continue;
-			bool IsLocalLine = false;
-			for(int Id : GameClient()->m_aLocalIds)
-			{
-				if(pLine->m_ClientId == Id)
-				{
-					IsLocalLine = true;
-					break;
-				}
-			}
-			if(IsLocalLine)
-				continue;
-			int Score = 0;
-			if(pName)
-			{
-				if(pLine->m_ClientId == CChat::SERVER_MSG)
-					continue;
-				if(str_comp(pLine->m_aName, pName) == 0)
-					Score = 2;
-				else if(str_comp_nocase(pLine->m_aName, pName) == 0)
-					Score = 1;
-				else
-					continue;
-			}
-			if(Score > ScoreBest)
-			{
-				ScoreBest = Score;
-				pLineBest = pLine;
-			}
-		}
-	}
-	if(!pLineBest || pLineBest->m_aText[0] == '\0')
-	{
-		GameClient()->m_Chat.Echo(Localize("No message to translate"));
-		return;
-	}
-
-	Translate(*pLineBest, ShowProgress);
-}
-
-void CTranslate::Translate(CChat::CLine &Line, bool ShowProgress)
-{
-	TranslateLine(Line, ShowProgress, false);
-}
-
-void CTranslate::TranslateLine(CChat::CLine &Line, bool ShowProgress, bool RespectIgnoredIncomingLanguages)
-{
-	if(!CanStartRequest())
-	{
-		return;
-	}
 
 	CTranslateJob Job;
 	Job.m_Type = CTranslateJob::EType::CHAT_LINE;
 	Job.m_pLine = &Line;
-	Job.m_RespectIgnoredIncomingLanguages = RespectIgnoredIncomingLanguages;
 	Job.m_pTranslateResponse = std::make_shared<CTranslateResponse>();
-	Job.m_pLine->m_pTranslateResponse = Job.m_pTranslateResponse;
-	Job.m_pBackend = CreateBackend(Job.m_pLine->m_aText, IncomingSourceLanguage(), IncomingTargetLanguage());
-	if(!Job.m_pBackend)
-	{
-		GameClient()->m_Chat.Echo(Localize("Invalid translate backend"));
-		return;
-	}
+	Job.m_RespectIgnoredIncomingLanguages = RespectIgnoredIncomingLanguages;
+	Job.m_pBackend = std::move(pBackend);
+	Job.m_Deadline = time() + time_freq() * TRANSLATE_TIMEOUT;
+	Line.m_pTranslateResponse = Job.m_pTranslateResponse;
 	m_NextRequestTime = time() + time_freq();
-
-	if(ShowProgress)
-	{
-		str_format(Job.m_pTranslateResponse->m_Text, sizeof(Job.m_pTranslateResponse->m_Text), Localize("%s translating to %s"), Job.m_pBackend->Name(), IncomingTargetLanguage());
-		Job.m_pLine->m_Time = time();
-	}
-	else
-	{
-		Job.m_pTranslateResponse->m_Text[0] = '\0';
-	}
-
 	m_vJobs.emplace_back(std::move(Job));
-
-	if(ShowProgress)
-		GameClient()->m_Chat.RebuildChat();
 }
 
-bool CTranslate::TryTranslateOutgoingChat(int Team, const char *pText)
+void CTranslate::OnConsoleInit()
+{
+	if(g_Config.m_TcTranslateAuto && !g_Config.m_TcTranslateAutoIncoming)
+	{
+		g_Config.m_TcTranslateAutoIncoming = 1;
+		g_Config.m_TcTranslateAuto = 0;
+	}
+	if(g_Config.m_TcTranslateOutgoing && !g_Config.m_TcTranslateAutoOutgoing)
+	{
+		g_Config.m_TcTranslateAutoOutgoing = 1;
+		g_Config.m_TcTranslateOutgoing = 0;
+	}
+	if(g_Config.m_BcTranslateOutgoingTarget[0] == '\0' || (str_comp(g_Config.m_BcTranslateOutgoingTarget, "en") == 0 && str_comp(g_Config.m_TcTranslateOutgoingTarget, "en") != 0))
+		str_copy(g_Config.m_BcTranslateOutgoingTarget, g_Config.m_TcTranslateOutgoingTarget);
+}
+
+void CTranslate::AutoTranslate(CChat::CLine &Line)
+{
+	if(!g_Config.m_TcTranslateAutoIncoming || Line.m_ClientId < 0 || Line.m_aName[0] == '\0')
+		return;
+	for(const int LocalId : GameClient()->m_aLocalIds)
+		if(LocalId >= 0 && LocalId == Line.m_ClientId)
+			return;
+	if(LanguagesEqual(IncomingSourceLanguage(), IncomingTargetLanguage()))
+		return;
+	TranslateLine(Line, true);
+}
+
+bool CTranslate::ChatDoTranslateOutgoing(int Team, const char *pText)
 {
 	if(!ShouldTranslateOutgoingChat(pText))
 		return false;
+	if(!CanStartRequest())
+	{
+		GameClient()->m_Chat.Echo(Localize("Translation queue is busy; message was not sent"));
+		return true;
+	}
 	if(m_vJobs.size() >= 16)
 	{
 		GameClient()->m_Chat.Echo(Localize("Translation queue is full"));
 		return true;
 	}
 
+	char aPrefix[MAX_CHAT_LENGTH] = "";
+	char aBody[MAX_CHAT_LENGTH] = "";
+	if(!ExtractOutgoingTranslatableText(*GameClient(), pText, aPrefix, sizeof(aPrefix), aBody, sizeof(aBody)))
+		return false;
+
+	auto pBackend = CreateBackend(aBody, OutgoingSourceLanguage(), OutgoingTargetLanguage());
+	if(!pBackend)
+	{
+		GameClient()->m_Chat.Echo(Localize("Invalid translate backend"));
+		return true;
+	}
+
 	CTranslateJob Job;
 	Job.m_Type = CTranslateJob::EType::OUTGOING_CHAT;
 	Job.m_Team = Team;
-	str_copy(Job.m_aOriginalText, pText, sizeof(Job.m_aOriginalText));
-	if(!ExtractOutgoingTranslatableText(*GameClient(), pText, Job.m_aOutgoingPrefix, sizeof(Job.m_aOutgoingPrefix), Job.m_aTextToTranslate, sizeof(Job.m_aTextToTranslate)))
-		str_copy(Job.m_aTextToTranslate, pText, sizeof(Job.m_aTextToTranslate));
 	Job.m_pTranslateResponse = std::make_shared<CTranslateResponse>();
+	Job.m_pBackend = std::move(pBackend);
+	Job.m_Deadline = time() + time_freq() * TRANSLATE_TIMEOUT;
+	str_copy(Job.m_aTextToTranslate, aBody);
+	str_copy(Job.m_aOutgoingPrefix, aPrefix);
+	m_NextRequestTime = time() + time_freq();
 	m_vJobs.emplace_back(std::move(Job));
 	return true;
 }
 
+void CTranslate::ToggleShiftClick()
+{
+	const int Target = std::clamp(g_Config.m_BcTranslateShiftClickTarget, 0, 2);
+	if(Target == 0)
+		g_Config.m_TcTranslateAutoIncoming ^= 1;
+	else if(Target == 1)
+		g_Config.m_TcTranslateAutoOutgoing ^= 1;
+	else if(g_Config.m_TcTranslateAutoIncoming && g_Config.m_TcTranslateAutoOutgoing)
+	{
+		g_Config.m_TcTranslateAutoIncoming = 0;
+		g_Config.m_TcTranslateAutoOutgoing = 0;
+	}
+	else
+	{
+		g_Config.m_TcTranslateAutoIncoming = 1;
+		g_Config.m_TcTranslateAutoOutgoing = 1;
+	}
+}
+
 void CTranslate::OnRender()
 {
-	if(!HasPendingJobs())
-		return;
-
-	bool RebuildChat = false;
-	time_t UpdateTime = 0;
+	const int64_t Now = time();
 	auto ForEach = [&](CTranslateJob &Job) {
-		if(Job.m_Type == CTranslateJob::EType::CHAT_LINE && Job.m_pLine->m_pTranslateResponse != Job.m_pTranslateResponse)
-			return true; // Not the same line anymore
-		if(Job.m_Type == CTranslateJob::EType::OUTGOING_CHAT && !Job.m_pBackend)
-		{
-			if(!CanStartRequest())
-				return false;
-			Job.m_pBackend = CreateBackend(Job.m_aTextToTranslate, OutgoingSourceLanguage(), OutgoingTargetLanguage());
-			if(!Job.m_pBackend)
-			{
-				m_NextRequestTime = time() + time_freq();
-				return false;
-			}
-			m_NextRequestTime = time() + time_freq();
-		}
-		const std::optional<bool> Done = Job.m_pBackend->Update(*Job.m_pTranslateResponse);
-		if(!Done.has_value())
-			return false; // Keep ongoing tasks
-
+		const bool TimedOut = Now >= Job.m_Deadline;
 		if(Job.m_Type == CTranslateJob::EType::OUTGOING_CHAT)
 		{
-			if(!*Done)
+			if(TimedOut)
 			{
-				if(Job.m_pBackend->IsRateLimited())
-					m_RateLimitUntil = time() + time_freq() * 30;
-				else
-					m_NextRequestTime = time() + time_freq();
-				Job.m_pBackend.reset();
+				GameClient()->m_Chat.Echo(Localize("Translation timed out; message was not sent"));
+				return true;
+			}
+			const std::optional<bool> Done = Job.m_pBackend->Update(*Job.m_pTranslateResponse);
+			if(!Done.has_value())
 				return false;
-			}
-
-			char aTranslated[MAX_LINE_LENGTH] = "";
-			char aPrefixedTranslated[MAX_LINE_LENGTH] = "";
-			if(Job.m_pTranslateResponse->m_Text[0] == '\0' ||
-				!SanitizeOutgoingTranslatedText(Job.m_aTextToTranslate, Job.m_pTranslateResponse->m_Text, aTranslated, sizeof(aTranslated)))
+			if(!*Done || !Job.m_pTranslateResponse->m_Text[0])
 			{
-				m_NextRequestTime = time() + time_freq();
-				Job.m_pBackend.reset();
-				return false;
+				char aBuf[sizeof(Job.m_pTranslateResponse->m_Text) + 96];
+				str_format(aBuf, sizeof(aBuf), Localize("Translation failed; message was not sent: %s"), Job.m_pTranslateResponse->m_Text);
+				GameClient()->m_Chat.Echo(aBuf);
+				return true;
 			}
-
-			const char *pTextToSend = aTranslated;
-			if(Job.m_aOutgoingPrefix[0] != '\0')
+			if(g_Config.m_BcTranslateOutgoingStripPunctuation)
+				StripApostrophesFromTranslatedText(Job.m_pTranslateResponse->m_Text);
+			char aText[MAX_CHAT_LENGTH] = "";
+			if(Job.m_aOutgoingPrefix[0])
 			{
-				str_copy(aPrefixedTranslated, Job.m_aOutgoingPrefix, sizeof(aPrefixedTranslated));
-				const int PrefixLen = str_length(aPrefixedTranslated);
-				str_append(aPrefixedTranslated, aTranslated, sizeof(aPrefixedTranslated));
-				// Do not send a truncated translated command.
-				if(str_length(aPrefixedTranslated) <= PrefixLen)
-					return false;
-				pTextToSend = aPrefixedTranslated;
+				str_copy(aText, Job.m_aOutgoingPrefix, sizeof(aText));
+				str_append(aText, Job.m_pTranslateResponse->m_Text, sizeof(aText));
 			}
-			GameClient()->m_Chat.SendTranslatedChatQueued(Job.m_Team, pTextToSend);
+			else
+				str_copy(aText, Job.m_pTranslateResponse->m_Text, sizeof(aText));
+			if(aText[0])
+				GameClient()->m_Chat.SendTranslatedChatQueued(Job.m_Team, aText);
+			else
+				GameClient()->m_Chat.Echo(Localize("Translation failed; message was not sent"));
 			return true;
 		}
 
-		if(*Done)
+		if(!Job.m_pLine || Job.m_pLine->m_pTranslateResponse != Job.m_pTranslateResponse)
+			return true;
+		if(TimedOut)
 		{
-			if(Job.m_RespectIgnoredIncomingLanguages && IsIgnoredIncomingLanguage(Job.m_pTranslateResponse->m_Language))
-			{
-				Job.m_pTranslateResponse->m_Text[0] = '\0';
-				Job.m_pTranslateResponse->m_Language[0] = '\0';
-			}
-			if(str_comp_nocase(Job.m_pLine->m_aText, Job.m_pTranslateResponse->m_Text) == 0)
-				Job.m_pTranslateResponse->m_Text[0] = '\0';
+			str_copy(Job.m_pTranslateResponse->m_Text, Localize("Translation timed out"));
+			Job.m_pTranslateResponse->m_Error = true;
 		}
 		else
 		{
-			if(Job.m_pBackend->IsRateLimited())
-				m_RateLimitUntil = time() + time_freq() * 30;
-			char aBuf[sizeof(Job.m_pTranslateResponse->m_Text)];
-			str_format(aBuf, sizeof(aBuf), Localize("%s to %s failed: %s"), Job.m_pBackend->Name(), IncomingTargetLanguage(), Job.m_pTranslateResponse->m_Text);
-			Job.m_pTranslateResponse->m_Error = true;
-			str_copy(Job.m_pTranslateResponse->m_Text, aBuf);
+			const std::optional<bool> Done = Job.m_pBackend->Update(*Job.m_pTranslateResponse);
+			if(!Done.has_value())
+				return false;
+			if(*Done)
+			{
+				if(Job.m_RespectIgnoredIncomingLanguages && IsIgnoredIncomingLanguage(Job.m_pTranslateResponse->m_Language))
+					Job.m_pTranslateResponse->m_Text[0] = '\0';
+				if(str_comp_nocase(Job.m_pLine->m_aText, Job.m_pTranslateResponse->m_Text) == 0)
+					Job.m_pTranslateResponse->m_Text[0] = '\0';
+			}
+			else
+			{
+				char aBuf[sizeof(Job.m_pTranslateResponse->m_Text)];
+				str_format(aBuf, sizeof(aBuf), Localize("Translation failed: %s"), Job.m_pTranslateResponse->m_Text);
+				Job.m_pTranslateResponse->m_Error = true;
+				str_copy(Job.m_pTranslateResponse->m_Text, aBuf);
+			}
 		}
-		if(UpdateTime == 0)
-			UpdateTime = time();
-		Job.m_pLine->m_Time = UpdateTime;
-		RebuildChat = true;
+		Job.m_pLine->m_Time = Now;
+		GameClient()->m_Chat.RebuildChat();
 		return true;
 	};
 	m_vJobs.erase(std::remove_if(m_vJobs.begin(), m_vJobs.end(), ForEach), m_vJobs.end());
-	if(RebuildChat)
-		GameClient()->m_Chat.RebuildChat();
-}
-
-void CTranslate::AutoTranslate(CChat::CLine &Line)
-{
-	if(!g_Config.m_TcTranslateAutoIncoming)
-		return;
-	if(IsAutoLanguage(IncomingTargetLanguage()))
-		return;
-	if(Line.m_ClientId < 0 || Line.m_aName[0] == '\0')
-		return;
-	for(const int Id : GameClient()->m_aLocalIds)
-	{
-		if(Id >= 0 && Id == Line.m_ClientId)
-			return;
-	}
-	if(LanguagesEqual(IncomingSourceLanguage(), IncomingTargetLanguage()))
-		return;
-	TranslateLine(Line, false, true);
 }

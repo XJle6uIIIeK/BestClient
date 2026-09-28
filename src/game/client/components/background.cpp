@@ -1,12 +1,15 @@
 #include "background.h"
 
-#include <base/system.h>
+#include <base/str.h>
 
 #include <engine/map.h>
 #include <engine/shared/config.h>
 
 #include <game/client/components/mapimages.h>
 #include <game/client/components/maplayers.h>
+// bestclient
+#include <game/client/components/bestclient/menu_media_background.h>
+// bestclient
 #include <game/client/gameclient.h>
 #include <game/layers.h>
 #include <game/localization.h>
@@ -32,16 +35,10 @@ void CBackground::OnInit()
 {
 	m_pBackgroundMap = CreateMap();
 	m_pMap = m_pBackgroundMap.get();
-	m_MediaBackground.Init(Graphics(), Storage());
 
 	m_pImages->OnInterfacesInit(GameClient());
 	if(g_Config.m_ClBackgroundEntities[0] != '\0' && str_comp(g_Config.m_ClBackgroundEntities, CURRENT_MAP))
 		LoadBackground();
-}
-
-void CBackground::OnShutdown()
-{
-	m_MediaBackground.Shutdown();
 }
 
 void CBackground::LoadBackground()
@@ -73,7 +70,7 @@ void CBackground::LoadBackground()
 		}
 		else if(m_pMap->Load(g_Config.m_ClBackgroundEntities, Storage(), aBuf, IStorage::TYPE_ALL))
 		{
-			m_pLayers->Init(m_pMap, true);
+			m_pLayers->Init(m_pMap, true, true);
 			NeedImageLoading = true;
 			m_Loaded = true;
 		}
@@ -99,53 +96,34 @@ void CBackground::OnMapLoad()
 
 void CBackground::OnRender()
 {
-	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
+	// bestclient
+	if(Client()->State() == IClient::STATE_ONLINE || Client()->State() == IClient::STATE_DEMOPLAYBACK)
 	{
-		m_MediaBackground.Unload();
-		return;
-	}
-
-	m_MediaBackground.SyncFromConfig(g_Config.m_BcGameMediaBackground, g_Config.m_BcMenuMediaBackgroundPath);
-	m_MediaBackground.Update();
-	// Only render with entities enabled: the map design background stays untouched,
-	// while in entities view the media replaces the plain background color.
-	if(g_Config.m_BcGameMediaBackground && g_Config.m_ClOverlayEntities > 0)
-	{
-		float ViewWidth = 0.0f;
-		float ViewHeight = 0.0f;
-		Graphics()->CalcScreenParams(Graphics()->ScreenAspect(), GetCurCamera()->m_Zoom, &ViewWidth, &ViewHeight);
-
-		CMenuMediaBackground::SRenderContext RenderContext;
-		RenderContext.m_CameraCenterX = GetCurCamera()->m_Center.x;
-		RenderContext.m_CameraCenterY = GetCurCamera()->m_Center.y;
-		RenderContext.m_ViewWidth = ViewWidth;
-		RenderContext.m_ViewHeight = ViewHeight;
-		RenderContext.m_WorldOffset = (float)g_Config.m_BcGameMediaBackgroundOffset / 100.0f;
-		if(GameClient()->Layers() != nullptr && GameClient()->Layers()->GameLayer() != nullptr)
+		CMenuMediaBackground &MediaBackground = GameClient()->m_BestClient.MenuMediaBackground();
+		MediaBackground.SyncFromConfig(g_Config.m_BcGameMediaBackground, g_Config.m_BcMenuMediaBackgroundPath);
+		MediaBackground.Update();
+		if(g_Config.m_BcGameMediaBackground && g_Config.m_ClOverlayEntities > 0)
 		{
-			RenderContext.m_MapWidth = GameClient()->Layers()->GameLayer()->m_Width * 32.0f;
-			RenderContext.m_MapHeight = GameClient()->Layers()->GameLayer()->m_Height * 32.0f;
-		}
+			float ViewWidth = 0.0f;
+			float ViewHeight = 0.0f;
+			Graphics()->CalcScreenParams(Graphics()->ScreenAspect(), GetCurCamera()->m_Zoom, &ViewWidth, &ViewHeight);
 
-		const bool Rendered = m_MediaBackground.Render(ViewWidth, ViewHeight, &RenderContext);
-
-		if(g_Config.m_Debug)
-		{
-			static int64_t s_LastLogTick = 0;
-			const int64_t Now = time_get();
-			if(s_LastLogTick == 0 || Now - s_LastLogTick >= time_freq())
+			CMenuMediaBackground::SRenderContext RenderContext;
+			RenderContext.m_CameraCenterX = GetCurCamera()->m_Center.x;
+			RenderContext.m_CameraCenterY = GetCurCamera()->m_Center.y;
+			RenderContext.m_ViewWidth = ViewWidth;
+			RenderContext.m_ViewHeight = ViewHeight;
+			RenderContext.m_WorldOffset = (float)g_Config.m_BcGameMediaBackgroundOffset / 100.0f;
+			if(GameClient()->Layers() != nullptr && GameClient()->Layers()->GameLayer() != nullptr)
 			{
-				dbg_msg("mediabg", "rendered=%d loaded=%d overlay=%d view=%.1fx%.1f zoom=%.2f offset=%d",
-					Rendered ? 1 : 0,
-					m_MediaBackground.IsLoaded() ? 1 : 0,
-					g_Config.m_ClOverlayEntities,
-					ViewWidth, ViewHeight,
-					GetCurCamera()->m_Zoom,
-					g_Config.m_BcGameMediaBackgroundOffset);
-				s_LastLogTick = Now;
+				RenderContext.m_MapWidth = GameClient()->Layers()->GameLayer()->m_Width * 32.0f;
+				RenderContext.m_MapHeight = GameClient()->Layers()->GameLayer()->m_Height * 32.0f;
 			}
+
+			MediaBackground.Render(ViewWidth, ViewHeight, &RenderContext);
 		}
 	}
+	// bestclient
 
 	if(g_Config.m_ClOverlayEntities != 100)
 		return;

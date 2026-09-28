@@ -1,7 +1,12 @@
+/* Copyright © 2026 BestProject Team */
 #include "edgehelper.h"
+
+#include <base/math.h>
+#include <base/str.h>
 
 #include <engine/graphics.h>
 #include <engine/shared/config.h>
+#include <engine/textrender.h>
 
 #include <generated/protocol.h>
 
@@ -97,8 +102,8 @@ CUIRect CEdgeHelper::GetRect(bool ForcePreview) const
 	CUIRect Rect;
 	Rect.w = HudWidth / 5.0f * Scale;
 	Rect.h = (PanelCount == 2 ? 50.0f : 25.0f) * Scale;
-	Rect.x = std::clamp(Layout.m_X, 0.0f, maximum(0.0f, HudWidth - Rect.w));
-	Rect.y = std::clamp(Layout.m_Y, 0.0f, maximum(0.0f, HudHeight - Rect.h));
+	Rect.x = std::clamp(Layout.m_X, 0.0f, std::max(0.0f, HudWidth - Rect.w));
+	Rect.y = std::clamp(Layout.m_Y, 0.0f, std::max(0.0f, HudHeight - Rect.h));
 	return Rect;
 }
 
@@ -106,14 +111,18 @@ void CEdgeHelper::RenderEdgeHelper(bool ForcePreview)
 {
 	const float HudHeight = HudLayout::CANVAS_HEIGHT;
 	const float HudWidth = HudHeight * Graphics()->ScreenAspect();
-	Graphics()->MapScreen(0.0f, 0.0f, HudWidth, HudHeight);
+	Graphics()->MapScreenToSize(HudWidth, HudHeight);
 
 	CUIRect Base = GetRect(ForcePreview);
 	if(Base.w <= 0.0f || Base.h <= 0.0f)
+	{
+		Ui()->MapScreen();
 		return;
+	}
 
 	const auto Layout = HudLayout::Get(HudLayout::MODULE_EDGE_INFO, HudWidth, HudHeight);
 	const float Scale = std::clamp(Layout.m_Scale / 100.0f, 0.25f, 3.0f);
+	const float ModuleAlpha = HudLayout::AlphaFactor(HudLayout::MODULE_EDGE_INFO);
 	const bool ShowEdgeInfo = g_Config.m_RiEdgeInfoCords != 0 || (ForcePreview && !g_Config.m_RiEdgeInfoJump);
 	const bool ShowJumpInfo = g_Config.m_RiEdgeInfoJump != 0 || (ForcePreview && !g_Config.m_RiEdgeInfoCords);
 	CUIRect EdgeInfo, JumpInfo;
@@ -121,7 +130,7 @@ void CEdgeHelper::RenderEdgeHelper(bool ForcePreview)
 	if(Layout.m_BackgroundEnabled)
 	{
 		const int Corners = HudLayout::BackgroundCorners(IGraphics::CORNER_ALL, Base.x, Base.y, Base.w, Base.h, HudWidth, HudHeight);
-		Base.Draw(color_cast<ColorRGBA>(ColorHSLA(Layout.m_BackgroundColor, true)), Corners, SEdgeHelperProperties::ms_Rounding * Scale);
+		Base.Draw(color_cast<ColorRGBA>(ColorHSLA(Layout.m_BackgroundColor, true)).WithMultipliedAlpha(ModuleAlpha), Corners, SEdgeHelperProperties::ms_Rounding * Scale);
 	}
 	Base.Margin(SEdgeHelperProperties::ms_Padding * Scale, &Base);
 
@@ -139,6 +148,8 @@ void CEdgeHelper::RenderEdgeHelper(bool ForcePreview)
 		RenderEdgeHelperEdgeInfo(ShowJumpInfo ? &EdgeInfo : &Base, Scale);
 	if(ShowJumpInfo)
 		RenderEdgeHelperJumpInfo(ShowEdgeInfo ? &JumpInfo : &Base, Scale);
+
+	Ui()->MapScreen();
 }
 
 int CEdgeHelper::GetPositionEdgeHelper(int ClientId, int Conn) const
@@ -224,19 +235,15 @@ void CEdgeHelper::RenderEdgeHelperJumpInfo(CUIRect *pBase, float Scale)
 {
 	CUIRect LeftZone, RightZone, CenterZone;
 	pBase->HSplitTop(SEdgeHelperProperties::ms_ItemSpacing * Scale, nullptr, pBase);
-	const float JumpScale = minimum(Scale, pBase->w / (5.0f * SEdgeHelperProperties::ms_ArrowsSize));
-	const float ActionSpacing = maximum(0.0f, (pBase->w - 5.0f * SEdgeHelperProperties::ms_ArrowsSize * JumpScale) / 4.0f);
+	const float JumpScale = std::min(Scale, pBase->w / (5.0f * SEdgeHelperProperties::ms_ArrowsSize));
+	const float ActionSpacing = std::max(0.0f, (pBase->w - 5.0f * SEdgeHelperProperties::ms_ArrowsSize * JumpScale) / 4.0f);
 	pBase->VSplitLeft(SEdgeHelperProperties::ms_ArrowsSize * JumpScale + ActionSpacing, &LeftZone, &CenterZone);
 	CenterZone.VSplitRight(SEdgeHelperProperties::ms_ArrowsSize * JumpScale + ActionSpacing, &CenterZone, &RightZone);
 	LeftZone.VSplitRight(ActionSpacing, &LeftZone, nullptr);
 	RightZone.VSplitLeft(ActionSpacing, nullptr, &RightZone);
 	LeftZone.Margin(SEdgeHelperProperties::ms_ItemSpacing * JumpScale, &LeftZone);
 	RightZone.Margin(SEdgeHelperProperties::ms_ItemSpacing * JumpScale, &RightZone);
-	const float ArrowFontSize = minimum(SEdgeHelperProperties::ms_ArrowsSize * JumpScale, minimum(LeftZone.h, RightZone.h));
-	// Single-jump positions: like the original rushie implementation, cut off
-	// the top part of the arrow rect and draw the single chevron in the lower
-	// part, so it aligns with (and lights up) the LOWER chevron of the double
-	// arrow instead of appearing centered between the two chevrons.
+	const float ArrowFontSize = std::min(SEdgeHelperProperties::ms_ArrowsSize * JumpScale, std::min(LeftZone.h, RightZone.h));
 	DoIconButton(&RightZone, s_pEdgeInfoAnglesUp, ArrowFontSize, (m_PosX == 56 || m_PosX == 69 || m_PosX == 72 || m_PosX == 84) ? SEdgeHelperProperties::ActionWhiteButtonColor() : SEdgeHelperProperties::WindowColorMedium());
 	if(m_PosX == 62 || m_PosX == 63 || m_PosX == 66 || m_PosX == 81)
 	{
@@ -250,9 +257,9 @@ void CEdgeHelper::RenderEdgeHelperJumpInfo(CUIRect *pBase, float Scale)
 		DoIconButton(&LeftZone, s_pEdgeInfoAngleUp, ArrowFontSize, SEdgeHelperProperties::ActionWhiteButtonColor());
 	}
 
-	const float SeparatorWidth = minimum(4.0f * JumpScale, CenterZone.w * 0.1f);
-	const float CenterValueWidth = minimum(24.0f * JumpScale, maximum(0.0f, CenterZone.w - SeparatorWidth * 2.0f));
-	const float SideValueWidth = maximum(0.0f, (CenterZone.w - CenterValueWidth - SeparatorWidth * 2.0f) * 0.5f);
+	const float SeparatorWidth = std::min(4.0f * JumpScale, CenterZone.w * 0.1f);
+	const float CenterValueWidth = std::min(24.0f * JumpScale, std::max(0.0f, CenterZone.w - SeparatorWidth * 2.0f));
+	const float SideValueWidth = std::max(0.0f, (CenterZone.w - CenterValueWidth - SeparatorWidth * 2.0f) * 0.5f);
 	CUIRect LeftSeparator, RightSeparator;
 	CenterZone.VSplitLeft(SideValueWidth, &LeftZone, &CenterZone);
 	CenterZone.VSplitLeft(SeparatorWidth, &LeftSeparator, &CenterZone);
@@ -262,8 +269,6 @@ void CEdgeHelper::RenderEdgeHelperJumpInfo(CUIRect *pBase, float Scale)
 	const auto CurIt = std::lower_bound(s_aEdgeInfoJumpPositions.begin(), s_aEdgeInfoJumpPositions.end(), m_PosX);
 	const int Upper = CurIt == s_aEdgeInfoJumpPositions.end() ? std::numeric_limits<int>::max() : *CurIt;
 	const int Lower = CurIt == s_aEdgeInfoJumpPositions.begin() ? std::numeric_limits<int>::min() : *std::prev(CurIt);
-	// Highlight the right side only when standing exactly on a jump position:
-	// Lower is strictly below m_PosX, Upper is the first position at/after it.
 	const bool AtJump = CurIt != s_aEdgeInfoJumpPositions.end() && *CurIt == m_PosX;
 	const float ValueFontSize = 12.0f * JumpScale;
 

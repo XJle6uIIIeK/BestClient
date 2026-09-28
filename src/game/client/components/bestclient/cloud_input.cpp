@@ -84,10 +84,14 @@ void CCloudInput::ApplyOffset(const CGameClient &GameClient, int ClientId, int &
 {
 	if(!IsActive())
 		return;
-	if(!GameClient.IsFastInputLocalClient(ClientId) && !g_Config.m_BcCloudInputOthers)
+	if(!GameClient.IsFastInputLocalClient(ClientId) && (!g_Config.m_BcCloudInputOthers || !GameClient.m_ReceivedPreInput))
 		return;
 
-	const float TotalSmoothTick = (Tick - 1) + Intra + Amount();
+	const float Offset = GameClient.IsFastInputLocalClient(ClientId) ? Amount() : (float)OthersTickOffset();
+	if(Offset <= 0.0f)
+		return;
+
+	const float TotalSmoothTick = (Tick - 1) + Intra + Offset;
 	Tick = (int)TotalSmoothTick + 1;
 	Intra = TotalSmoothTick - (int)TotalSmoothTick;
 	if(Intra < 0.0f && Tick > 0)
@@ -102,10 +106,11 @@ bool CCloudInput::TryGetPredPos(const CGameClient &GameClient, int ClientId, int
 	if(!IsActive() || Tick <= 0)
 		return false;
 
-	const int MaxTick = GameClient.Client()->PredGameTick(g_Config.m_ClDummy) + SelfTickOffset();
-	if(GameClient.m_aClients[ClientId].m_aPredTick[(Tick - 1) % 200] != Tick - 1 ||
-		GameClient.m_aClients[ClientId].m_aPredTick[Tick % 200] != Tick ||
-		GameClient.m_aClients[ClientId].m_aPredTick[Tick % 200] > MaxTick)
+	const int TickOffset = GameClient.IsFastInputLocalClient(ClientId) ? SelfTickOffset() : OthersTickOffset();
+	const int MaxTick = GameClient.Client()->PredGameTick(g_Config.m_ClDummy) + TickOffset;
+	if(Tick > MaxTick ||
+		GameClient.m_aClients[ClientId].m_aPredTick[(Tick - 1) % 200] != Tick - 1 ||
+		GameClient.m_aClients[ClientId].m_aPredTick[Tick % 200] != Tick)
 		return false;
 
 	OutPos = mix(GameClient.m_aClients[ClientId].m_aPredPos[(Tick - 1) % 200], GameClient.m_aClients[ClientId].m_aPredPos[Tick % 200], Intra);

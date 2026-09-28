@@ -12,7 +12,7 @@
 #include <unordered_map>
 #include <vector>
 
-class CHttpRequest;
+class IHttpRequest;
 class CUi;
 class IHttp;
 class ITextRender;
@@ -51,20 +51,21 @@ public:
 	static float LyricsTextSlotWidth(float Scale, float WidthScale);
 	static bool ParseSyncedLyrics(const char *pSyncedLyrics, std::vector<SLine> &vOut);
 
-	// Advance display timers (not-found hold). Call once per frame before PreferredTextSlotWidth.
 	void TickDisplay(float Delta);
-	// HUD text-slot width for the current lyrics/status/title content, clamped to MaxWidth.
 	float PreferredTextSlotWidth(ITextRender *pTextRender, float FontSize, float MaxWidth, float Scale, float WidthScale) const;
 
 	void Render(ITextRender *pTextRender, CUi *pUi, const CUIRect &Area, float FontSize, float Delta);
 
 private:
-	// Display index: -99 = none, -20/-19 = not-found then title, -3/-2/-1 = countdown 3/2/1, >=0 = lyric line.
 	static constexpr int LINE_NONE = -99;
+	static constexpr int FALLBACK_NO_CONNECTION = -22;
+	static constexpr int FALLBACK_ELLIPSIS = -21;
 	static constexpr int FALLBACK_NOT_FOUND = -20;
 	static constexpr int FALLBACK_TITLE = -19;
+	static constexpr int FALLBACK_BRAND = -18;
 	static constexpr int64_t NOT_FOUND_HOLD_MS = 5000;
 	static constexpr int64_t OFFLINE_HOLD_MS = 5000;
+	static constexpr int64_t BACKWARDS_SEEK_THRESHOLD_MS = 800;
 
 	struct SCacheEntry
 	{
@@ -76,14 +77,21 @@ private:
 	{
 		int m_ByteOffset = 0;
 		int m_ByteLength = 0;
-		float m_PrefixWidth = 0.0f; // width of text[0 .. byteOffset)
+		float m_PrefixWidth = 0.0f;
 	};
 
 	static std::string BuildCacheKey(const char *pTitle, const char *pArtist, int64_t DurationMs);
 	static bool ParseLrcTimestamp(const char *pText, int64_t &OutMs, const char **ppEnd);
 	static void MergeConsecutiveIdenticalLines(std::vector<SLine> &vLines);
 	static bool IsCountdownIndex(int Index) { return Index >= -3 && Index <= -1; }
-	static bool IsFallbackIndex(int Index) { return Index == FALLBACK_NOT_FOUND || Index == FALLBACK_TITLE; }
+	static bool IsFallbackIndex(int Index)
+	{
+		return Index == FALLBACK_NO_CONNECTION || Index == FALLBACK_ELLIPSIS || Index == FALLBACK_NOT_FOUND || Index == FALLBACK_TITLE || Index == FALLBACK_BRAND;
+	}
+	static bool IsMutedFallback(int Index)
+	{
+		return Index == FALLBACK_NO_CONNECTION || Index == FALLBACK_ELLIPSIS || Index == FALLBACK_NOT_FOUND;
+	}
 	static int CountdownDigit(int Index) { return -Index; }
 	const char *FallbackText(int Index) const;
 	int ResolveDisplayLineIndex() const;
@@ -104,14 +112,13 @@ private:
 	std::string m_TrackTitle;
 	EDisplayState m_DisplayState = EDisplayState::Idle;
 	std::vector<SLine> m_vLines;
-	std::shared_ptr<CHttpRequest> m_pRequest;
+	std::shared_ptr<IHttpRequest> m_pRequest;
 	std::unordered_map<std::string, SCacheEntry> m_Cache;
 	int64_t m_OfflineRetryAt = 0;
 	float m_NotFoundDisplayMs = 0.0f;
 	float m_OfflineDisplayMs = 0.0f;
 	float m_TitleMarqueeOffset = 0.0f;
 
-	// Independent monotonic playback clock (media snapshots can jump backward).
 	int64_t m_ClockPositionMs = 0;
 	int64_t m_ClockTick = 0;
 	bool m_ClockPlaying = false;

@@ -5,10 +5,12 @@
 #include "protocol.h"
 
 #include <base/color.h>
+#include <base/dbg.h>
+#include <base/io.h>
 #include <base/log.h>
 #include <base/math.h>
+#include <base/mem.h>
 #include <base/str.h>
-#include <base/system.h>
 #include <base/time.h>
 
 #include <engine/client.h>
@@ -16,7 +18,7 @@
 #include <engine/graphics.h>
 #include <engine/shared/bestclient_indicator_protocol.h>
 #include <engine/shared/config.h>
-#include <engine/shared/http.h>
+#include <engine/http.h>
 #include <engine/shared/json.h>
 #include <engine/storage.h>
 #include <engine/textrender.h>
@@ -57,9 +59,8 @@ namespace
 	constexpr int SERVER_LIST_PING_INTERVAL_SEC = 30;
 	constexpr const char *MANAGED_VOICE_SERVER_CONFIG = "managed";
 	constexpr const char *VOICE_MUTED_CFG_PATH = "BestClient/voice_muted.cfg";
+	constexpr const char *DEFAULT_VOICE_SERVER_ADDRESS = "193.23.201.125:8777";
 	constexpr uint8_t OBFUSCATION_KEY = 0x5a;
-	constexpr std::array<uint8_t, 19> OBFUSCATED_DEFAULT_VOICE_SERVER_ADDRESS = {
-		107, 99, 105, 116, 104, 105, 116, 104, 106, 107, 116, 107, 104, 111, 96, 98, 109, 109, 109};
 	constexpr std::array<uint8_t, 23> OBFUSCATED_VOICE_AUTH_KEY = {
 		56, 57, 44, 110, 119, 40, 63, 54, 119, 107, 109, 107, 119, 44, 53, 51, 57, 63, 119, 54, 53, 57, 49};
 	constexpr std::array<uint8_t, 46> OBFUSCATED_VOICE_MASTER_LIST_URL = {
@@ -78,7 +79,7 @@ namespace
 
 	const std::string &DefaultVoiceServerAddress()
 	{
-		static const std::string s_Address = DecodeObfuscatedString(OBFUSCATED_DEFAULT_VOICE_SERVER_ADDRESS);
+		static const std::string s_Address = DEFAULT_VOICE_SERVER_ADDRESS;
 		return s_Address;
 	}
 
@@ -101,6 +102,21 @@ namespace
 		BestClientVoice::WriteU16(vOut, (uint16_t)Len);
 		for(int i = 0; i < Len; i++)
 			vOut.push_back((uint8_t)pStr[i]);
+	}
+
+	void AppendHelloIdentity(std::vector<uint8_t> &vBody, int LocalClientId, const char *pName, CUuid Instance, uint8_t Channel, const uint8_t *pLinkToken)
+	{
+		if(LocalClientId >= 0 && LocalClientId < MAX_CLIENTS && pName != nullptr)
+		{
+			BestClientVoice::WriteU8(vBody, BestClientVoice::HELLO_NAME_PRESENT);
+			WriteVoiceString(vBody, pName, BestClientVoice::MAX_PLAYER_NAME_LENGTH);
+		}
+		else
+			BestClientVoice::WriteU8(vBody, BestClientVoice::HELLO_NAME_ABSENT);
+		BestClientVoice::WriteUuid(vBody, Instance);
+		BestClientVoice::WriteU8(vBody, Channel);
+		if(Channel == BestClientVoice::HELLO_CHANNEL_SECONDARY && pLinkToken != nullptr)
+			BestClientVoice::WriteRaw(vBody, pLinkToken, BestClientVoice::LINK_TOKEN_SIZE);
 	}
 
 	bool ReadVoiceString(const uint8_t *pData, int DataSize, int &Offset, std::string &Out, int MaxLen = 128)
@@ -185,8 +201,6 @@ namespace
 		opus_encoder_ctl(pEncoder, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
 		opus_encoder_ctl(pEncoder, OPUS_SET_DTX(0));
 
-		// Client-side resilience. Server just relays Opus payloads.
-		// Start with full-quality mode and enable FEC/loss adaptation only when needed.
 		opus_encoder_ctl(pEncoder, OPUS_SET_INBAND_FEC(0));
 		opus_encoder_ctl(pEncoder, OPUS_SET_PACKET_LOSS_PERC(0));
 	}
@@ -287,7 +301,6 @@ namespace
 		const float Dt = 1.0f / BestClientVoice::SAMPLE_RATE;
 		const float Alpha = Rc / (Rc + Dt);
 
-		// Rushie defaults.
 		const float Threshold = 0.20f;
 		const float Ratio = 2.5f;
 		const float AttackSec = 0.02f;
@@ -519,16 +532,9 @@ namespace
 
 	ColorRGBA VoiceHudThemeColor(CGameClient *pGameClient, ColorRGBA Fallback, bool ForcePreview, float MixAmount)
 	{
-		ColorRGBA ThemeColor;
-		if(pGameClient != nullptr && pGameClient->m_MusicPlayer.GetHudThemeColor(ThemeColor, ForcePreview))
-		{
-			const float Blend = std::clamp(MixAmount, 0.0f, 1.0f);
-			return ColorRGBA(
-				mix(Fallback.r, ThemeColor.r, Blend),
-				mix(Fallback.g, ThemeColor.g, Blend),
-				mix(Fallback.b, ThemeColor.b, Blend),
-				mix(Fallback.a, ThemeColor.a, Blend));
-		}
+		(void)pGameClient;
+		(void)ForcePreview;
+		(void)MixAmount;
 		return Fallback;
 	}
 
@@ -585,10 +591,16 @@ void CVoiceChat::OnReset()
 	m_AdvertisedPlayerName.clear();
 	m_AdvertisedGameClientId = BestClientVoice::INVALID_GAME_CLIENT_ID - 1;
 	m_AdvertisedTeam = std::numeric_limits<int>::min();
+	m_ClientInstanceId = UUID_ZEROED;
+	mem_zero(m_LinkToken, sizeof(m_LinkToken));
+	m_HasLinkToken = false;
+	m_OfficialRejected = false;
+	m_LastUnofficialNoticeTick = 0;
 	m_SecondaryAdvertisedRoomKey.clear();
 	m_SecondaryAdvertisedPlayerName.clear();
 	m_SecondaryAdvertisedGameClientId = BestClientVoice::INVALID_GAME_CLIENT_ID - 1;
 	m_SecondaryAdvertisedTeam = std::numeric_limits<int>::min();
+	m_SecondaryClientInstanceId = UUID_ZEROED;
 	m_EnableYourGroupRevealPhase = g_Config.m_BcVoiceChatUseTeam0 ? 1.0f : 0.0f;
 	m_LastUseTeam0Mode = g_Config.m_BcVoiceChatUseTeam0 != 0;
 	m_LastEnableYourGroup = g_Config.m_BcVoiceChatUseTeam0 != 0 && g_Config.m_BcVoiceChatEnableYourGroup != 0;
@@ -608,7 +620,6 @@ void CVoiceChat::LoadMutedNamesFromFile()
 	unsigned DataSize = 0;
 	if(!Storage()->ReadFile(VOICE_MUTED_CFG_PATH, IStorage::TYPE_SAVE, &pData, &DataSize))
 	{
-		// No legacy file yet: persist current state so future sessions use the dedicated file.
 		SaveMutedNamesToFile();
 		str_copy(m_aLastPersistedMutedNames, g_Config.m_BcVoiceChatMutedNames, sizeof(m_aLastPersistedMutedNames));
 		return;
@@ -768,12 +779,10 @@ void CVoiceChat::OnUpdate()
 	const bool Enabled = g_Config.m_BcVoiceChatEnable != 0;
 	if(!Enabled)
 	{
-		m_SubsystemState = ESubsystemRuntimeState::DISABLED;
 		if(m_Socket)
 			StopVoice();
 		return;
 	}
-	m_SubsystemState = ESubsystemRuntimeState::ARMED;
 
 	if(ServerChanged || DeviceChanged)
 	{
@@ -796,7 +805,6 @@ void CVoiceChat::OnUpdate()
 		{
 			m_LastStartAttempt = Now;
 			m_RuntimeState = m_RuntimeState == RUNTIME_RECONNECTING ? RUNTIME_RECONNECTING : RUNTIME_STARTING;
-			m_SubsystemState = ESubsystemRuntimeState::ARMED;
 			StartVoice();
 		}
 		if(!m_Socket)
@@ -812,7 +820,6 @@ void CVoiceChat::OnUpdate()
 	}
 
 	ProcessNetwork();
-	m_SubsystemState = ESubsystemRuntimeState::ACTIVE;
 
 	if(!m_pEncoder)
 		return;
@@ -848,7 +855,7 @@ void CVoiceChat::OnUpdate()
 	}
 	if(IdentityChanged)
 		m_HelloResetPending = true;
-	if(NeedsRegistrationHello || NeedsHeartbeatHello)
+	if(!m_OfficialRejected && (NeedsRegistrationHello || NeedsHeartbeatHello))
 		SendHello();
 
 	const bool UseSecondaryConnection = ShouldUseSecondaryTeamConnection();
@@ -884,7 +891,7 @@ void CVoiceChat::OnUpdate()
 			const bool SecondaryNeedsHeartbeatHello = m_SecondaryRegistered && (SecondaryIdentityChanged || m_SecondaryLastHeartbeatTick == 0 || Now - m_SecondaryLastHeartbeatTick > VOICE_HEARTBEAT_SECONDS * time_freq());
 			if(SecondaryIdentityChanged)
 				m_SecondaryHelloResetPending = true;
-			if(SecondaryNeedsRegistrationHello || SecondaryNeedsHeartbeatHello)
+			if(m_HasLinkToken && !m_OfficialRejected && (SecondaryNeedsRegistrationHello || SecondaryNeedsHeartbeatHello))
 				SendHelloSecondary();
 		}
 	}
@@ -902,12 +909,11 @@ void CVoiceChat::OnUpdate()
 	}
 	else if(m_Socket && m_LastActiveTick > 0 && Now - m_LastActiveTick > VOICE_IDLE_SHUTDOWN_SECONDS * time_freq())
 	{
-		m_SubsystemState = ESubsystemRuntimeState::COOLDOWN;
 		StopVoice();
 	}
 
 	m_LastUpdateCostTick = time_get() - PerfStart;
-	m_MaxUpdateCostTick = maximum(m_MaxUpdateCostTick, m_LastUpdateCostTick);
+	m_MaxUpdateCostTick = std::max(m_MaxUpdateCostTick, m_LastUpdateCostTick);
 	m_TotalUpdateCostTick += m_LastUpdateCostTick;
 	++m_UpdateSamples;
 	if(g_Config.m_Debug)
@@ -951,26 +957,26 @@ namespace
 	{
 		Team0GroupRevealPhase = std::clamp(Team0GroupRevealPhase, 0.0f, 1.0f);
 		const int VisibleRows = std::clamp(ServerCount > 0 ? ServerCount : 1, 1, 2);
-		const float ServerListHeight = 2.0f + VisibleRows * kVoiceMenuServerRowHeight + maximum(0, VisibleRows - 1) * kVoiceMenuServerRowGap;
-		return 4.0f + 20.0f + // In-Game only checkbox row.
-		       4.0f + 20.0f + // Use team0 checkbox row.
-		       (4.0f + 20.0f) * Team0GroupRevealPhase + // Enable your group row (animated reveal).
-		       4.0f + 20.0f + // Radius filter checkbox row.
-		       (RadiusFilterEnabled ? (3.0f + 20.0f) : 0.0f) + // Radius slider row.
-		       4.0f + 18.0f + // Activation mode label.
-		       3.0f + 22.0f + // Activation mode segmented control.
-		       (AutomaticMode ? (3.0f + 20.0f + 3.0f + 20.0f) : 0.0f) + // VAD threshold + release delay rows.
-		       4.0f + 20.0f + // Mic check checkbox row.
-		       4.0f + 16.0f + // Microphone level meter row.
-		       3.0f + 20.0f + // Mic gain slider row.
-		       3.0f + 20.0f + // Voice volume slider row.
-		       5.0f + 20.0f + 2.0f + 24.0f + // Microphone device.
-		       5.0f + 20.0f + 2.0f + 24.0f + // Headphones device.
-		       6.0f + 16.0f + // Status.
-		       4.0f + 22.0f + // Reload button.
-		       5.0f + 16.0f + 2.0f + // Servers label.
+		const float ServerListHeight = 2.0f + VisibleRows * kVoiceMenuServerRowHeight + std::max(0, VisibleRows - 1) * kVoiceMenuServerRowGap;
+		return 4.0f + 20.0f +
+		       4.0f + 20.0f +
+		       (4.0f + 20.0f) * Team0GroupRevealPhase +
+		       4.0f + 20.0f +
+		       (RadiusFilterEnabled ? (3.0f + 20.0f) : 0.0f) +
+		       4.0f + 18.0f +
+		       3.0f + 22.0f +
+		       (AutomaticMode ? (3.0f + 20.0f + 3.0f + 20.0f) : 0.0f) +
+		       4.0f + 20.0f +
+		       4.0f + 16.0f +
+		       3.0f + 20.0f +
+		       3.0f + 20.0f +
+		       5.0f + 20.0f + 2.0f + 24.0f +
+		       5.0f + 20.0f + 2.0f + 24.0f +
+		       6.0f + 16.0f +
+		       4.0f + 22.0f +
+		       5.0f + 16.0f + 2.0f +
 		       ServerListHeight +
-		       5.0f + 16.0f + 2.0f + 14.0f + 2.0f + 14.0f + 2.0f + 14.0f; // Command hints.
+		       5.0f + 16.0f + 2.0f + 14.0f + 2.0f + 14.0f + 2.0f + 14.0f;
 	}
 }
 
@@ -1059,7 +1065,7 @@ void CVoiceChat::RenderMenuSettingsBlock(const CUIRect &View, float RevealPhase)
 
 		std::vector<std::string> vDeviceNames;
 		vDeviceNames.reserve((size_t)DeviceCount + 1);
-		vDeviceNames.emplace_back(Localize("System default"));
+		vDeviceNames.emplace_back(BcLocalize("System default"));
 		for(int i = 0; i < DeviceCount; ++i)
 		{
 			const char *pDeviceName = SDL_GetAudioDeviceName(i, IsCapture);
@@ -1068,7 +1074,7 @@ void CVoiceChat::RenderMenuSettingsBlock(const CUIRect &View, float RevealPhase)
 			else
 			{
 				char aDevice[32];
-				str_format(aDevice, sizeof(aDevice), "Device #%d", i + 1);
+				str_format(aDevice, sizeof(aDevice), BcLocalize("Device #%d"), i + 1);
 				vDeviceNames.emplace_back(aDevice);
 			}
 		}
@@ -1090,12 +1096,12 @@ void CVoiceChat::RenderMenuSettingsBlock(const CUIRect &View, float RevealPhase)
 
 	CUIRect Row;
 	if(AddRow(kVoiceMenuTitleRowHeight, Row))
-		Ui()->DoLabel(&Row, Localize("Voice"), 20.0f, TEXTALIGN_ML);
+		Ui()->DoLabel(&Row, BcLocalize("Voice"), 20.0f, TEXTALIGN_ML);
 
 	AddSpacing(kVoiceMenuTitleToEnableSpacing);
 	if(AddRow(kVoiceMenuEnableRowHeight, Row))
 	{
-		if(GameClient()->m_Menus.DoButton_CheckBox(&m_EnableVoiceButton, Localize("Enable voice chat"), g_Config.m_BcVoiceChatEnable, &Row))
+		if(GameClient()->m_Menus.DoButton_CheckBox(&m_EnableVoiceButton, BcLocalize("Enable voice chat"), g_Config.m_BcVoiceChatEnable, &Row))
 		{
 			g_Config.m_BcVoiceChatEnable ^= 1;
 			if(!g_Config.m_BcVoiceChatEnable && m_Socket)
@@ -1135,14 +1141,14 @@ void CVoiceChat::RenderMenuSettingsBlock(const CUIRect &View, float RevealPhase)
 	AddExpandedSpacing(4.0f);
 	if(AddExpandedRow(20.0f, Row))
 	{
-		if(GameClient()->m_Menus.DoButton_CheckBox(&m_InGameOnlyButton, Localize("In-Game Only"), g_Config.m_BcVoiceChatInGameOnly, &Row))
+		if(GameClient()->m_Menus.DoButton_CheckBox(&m_InGameOnlyButton, BcLocalize("In-Game Only"), g_Config.m_BcVoiceChatInGameOnly, &Row))
 			g_Config.m_BcVoiceChatInGameOnly ^= 1;
 	}
 
 	AddExpandedSpacing(4.0f);
 	if(AddExpandedRow(20.0f, Row))
 	{
-		if(GameClient()->m_Menus.DoButton_CheckBox(&m_UseTeam0Button, Localize("Use team0"), g_Config.m_BcVoiceChatUseTeam0, &Row))
+		if(GameClient()->m_Menus.DoButton_CheckBox(&m_UseTeam0Button, BcLocalize("Use team0"), g_Config.m_BcVoiceChatUseTeam0, &Row))
 		{
 			g_Config.m_BcVoiceChatUseTeam0 ^= 1;
 			if(g_Config.m_BcVoiceChatUseTeam0 == 0)
@@ -1157,7 +1163,7 @@ void CVoiceChat::RenderMenuSettingsBlock(const CUIRect &View, float RevealPhase)
 		CUIRect ClippedRow;
 		if(AddExpandedRow(20.0f * YourGroupRowPhase, ClippedRow) && ClippedRow.h > 0.0f)
 		{
-			if(GameClient()->m_Menus.DoButton_CheckBox(&m_EnableYourGroupButton, Localize("Enable your group"), g_Config.m_BcVoiceChatEnableYourGroup, &ClippedRow))
+			if(GameClient()->m_Menus.DoButton_CheckBox(&m_EnableYourGroupButton, BcLocalize("Enable your group"), g_Config.m_BcVoiceChatEnableYourGroup, &ClippedRow))
 				g_Config.m_BcVoiceChatEnableYourGroup ^= 1;
 		}
 	}
@@ -1165,7 +1171,7 @@ void CVoiceChat::RenderMenuSettingsBlock(const CUIRect &View, float RevealPhase)
 	AddExpandedSpacing(4.0f);
 	if(AddExpandedRow(20.0f, Row))
 	{
-		if(GameClient()->m_Menus.DoButton_CheckBox(&m_RadiusFilterButton, Localize("Radius filter"), g_Config.m_BcVoiceChatRadiusEnabled, &Row))
+		if(GameClient()->m_Menus.DoButton_CheckBox(&m_RadiusFilterButton, BcLocalize("Radius filter"), g_Config.m_BcVoiceChatRadiusEnabled, &Row))
 			g_Config.m_BcVoiceChatRadiusEnabled ^= 1;
 	}
 
@@ -1174,13 +1180,13 @@ void CVoiceChat::RenderMenuSettingsBlock(const CUIRect &View, float RevealPhase)
 		AddExpandedSpacing(3.0f);
 		if(AddExpandedRow(20.0f, Row))
 		{
-			Ui()->DoScrollbarOption(&g_Config.m_BcVoiceChatRadiusTiles, &g_Config.m_BcVoiceChatRadiusTiles, &Row, Localize("Radius (tiles)"), 1, 500);
+			Ui()->DoScrollbarOption(&g_Config.m_BcVoiceChatRadiusTiles, &g_Config.m_BcVoiceChatRadiusTiles, &Row, BcLocalize("Radius (tiles)"), 1, 500);
 		}
 	}
 
 	AddExpandedSpacing(4.0f);
 	if(AddExpandedRow(18.0f, Row))
-		Ui()->DoLabel(&Row, Localize("Activation mode"), 14.0f, TEXTALIGN_ML);
+		Ui()->DoLabel(&Row, BcLocalize("Activation mode"), 14.0f, TEXTALIGN_ML);
 	AddExpandedSpacing(3.0f);
 	if(AddExpandedRow(22.0f, Row))
 	{
@@ -1190,29 +1196,26 @@ void CVoiceChat::RenderMenuSettingsBlock(const CUIRect &View, float RevealPhase)
 		Row.VSplitMid(&Left, &Right, 1.0f);
 		const bool Automatic = g_Config.m_BcVoiceChatActivationMode == 0;
 		const bool Ptt = g_Config.m_BcVoiceChatActivationMode == 1;
-		if(GameClient()->m_Menus.DoButton_Menu(&s_ModeAutomaticButton, Localize("Automatic"), Automatic, &Left, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_L))
+		if(GameClient()->m_Menus.DoButton_Menu(&s_ModeAutomaticButton, BcLocalize("Automatic"), Automatic, &Left, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_L))
 			g_Config.m_BcVoiceChatActivationMode = 0;
-		if(GameClient()->m_Menus.DoButton_Menu(&s_ModePttButton, Localize("Push-to-talk"), Ptt, &Right, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_R))
+		if(GameClient()->m_Menus.DoButton_Menu(&s_ModePttButton, BcLocalize("Push-to-talk"), Ptt, &Right, BUTTONFLAG_LEFT, nullptr, IGraphics::CORNER_R))
 			g_Config.m_BcVoiceChatActivationMode = 1;
 	}
 	if(g_Config.m_BcVoiceChatActivationMode == 0)
 	{
 		AddExpandedSpacing(3.0f);
 		if(AddExpandedRow(20.0f, Row))
-			Ui()->DoScrollbarOption(&g_Config.m_BcVoiceChatVadThreshold, &g_Config.m_BcVoiceChatVadThreshold, &Row, Localize("VAD threshold (%)"), 0, 100);
+			Ui()->DoScrollbarOption(&g_Config.m_BcVoiceChatVadThreshold, &g_Config.m_BcVoiceChatVadThreshold, &Row, BcLocalize("VAD threshold (%)"), 0, 100);
 
 		AddExpandedSpacing(3.0f);
 		if(AddExpandedRow(20.0f, Row))
-			Ui()->DoScrollbarOption(&g_Config.m_BcVoiceChatVadReleaseDelayMs, &g_Config.m_BcVoiceChatVadReleaseDelayMs, &Row, Localize("VAD release delay (ms)"), 0, 1000);
+			Ui()->DoScrollbarOption(&g_Config.m_BcVoiceChatVadReleaseDelayMs, &g_Config.m_BcVoiceChatVadReleaseDelayMs, &Row, BcLocalize("VAD release delay (ms)"), 0, 1000);
 	}
 
-	// Mic check (local loopback), microphone level meter, mic gain and voice volume were only
-	// reachable from the removed in-game voice panel in the original client. They live here now
-	// so they stay accessible from the settings menu.
 	AddExpandedSpacing(4.0f);
 	if(AddExpandedRow(20.0f, Row))
 	{
-		if(GameClient()->m_Menus.DoButton_CheckBox(&m_MicCheckButton, Localize("Mic check (loopback)"), g_Config.m_BcVoiceChatMicCheck, &Row))
+		if(GameClient()->m_Menus.DoButton_CheckBox(&m_MicCheckButton, BcLocalize("Mic check (loopback)"), g_Config.m_BcVoiceChatMicCheck, &Row))
 			g_Config.m_BcVoiceChatMicCheck ^= 1;
 	}
 
@@ -1221,7 +1224,7 @@ void CVoiceChat::RenderMenuSettingsBlock(const CUIRect &View, float RevealPhase)
 	{
 		CUIRect MeterLabel, MeterBarWrap, MeterBar;
 		Row.VSplitLeft(100.0f, &MeterLabel, &MeterBarWrap);
-		Ui()->DoLabel(&MeterLabel, Localize("Mic level"), 12.0f, TEXTALIGN_ML);
+		Ui()->DoLabel(&MeterLabel, BcLocalize("Mic level"), 12.0f, TEXTALIGN_ML);
 		MeterBarWrap.VSplitLeft(6.0f, nullptr, &MeterBarWrap);
 		MeterBarWrap.HMargin(2.0f, &MeterBar);
 		MeterBar.Draw(ColorRGBA(0.02f, 0.02f, 0.03f, 0.28f), IGraphics::CORNER_ALL, 3.0f);
@@ -1237,7 +1240,7 @@ void CVoiceChat::RenderMenuSettingsBlock(const CUIRect &View, float RevealPhase)
 		Fill.w *= DisplayLevel;
 		if(Fill.w > 0.0f)
 		{
-			const float Rounding = minimum(3.0f, minimum(Fill.w * 0.5f, Fill.h * 0.5f));
+			const float Rounding = std::min(3.0f, std::min(Fill.w * 0.5f, Fill.h * 0.5f));
 			const int Corners = Fill.w >= MeterBar.w ? IGraphics::CORNER_ALL : IGraphics::CORNER_L;
 			Fill.Draw(ColorRGBA(0.30f, 0.70f, 0.42f, 0.78f), Corners, Rounding);
 		}
@@ -1245,45 +1248,45 @@ void CVoiceChat::RenderMenuSettingsBlock(const CUIRect &View, float RevealPhase)
 
 	AddExpandedSpacing(3.0f);
 	if(AddExpandedRow(20.0f, Row))
-		Ui()->DoScrollbarOption(&g_Config.m_BcVoiceChatMicGain, &g_Config.m_BcVoiceChatMicGain, &Row, Localize("Mic gain"), 0, 300, &CUi::ms_LinearScrollbarScale, 0u, "%");
+		Ui()->DoScrollbarOption(&g_Config.m_BcVoiceChatMicGain, &g_Config.m_BcVoiceChatMicGain, &Row, BcLocalize("Mic gain"), 0, 300, &CUi::ms_LinearScrollbarScale, 0u, "%");
 
 	AddExpandedSpacing(3.0f);
 	if(AddExpandedRow(20.0f, Row))
-		Ui()->DoScrollbarOption(&g_Config.m_BcVoiceChatVolume, &g_Config.m_BcVoiceChatVolume, &Row, Localize("Voice volume"), 0, 200, &CUi::ms_LogarithmicScrollbarScale, 0u, "%");
+		Ui()->DoScrollbarOption(&g_Config.m_BcVoiceChatVolume, &g_Config.m_BcVoiceChatVolume, &Row, BcLocalize("Voice volume"), 0, 200, &CUi::ms_LogarithmicScrollbarScale, 0u, "%");
 
 	AddExpandedSpacing(5.0f);
 	static CScrollRegion s_InputDeviceDropDownScrollRegion;
 	static CScrollRegion s_OutputDeviceDropDownScrollRegion;
-	RenderDeviceDropDown(ExpandedArea, Localize("Microphone"), 1, g_Config.m_BcVoiceChatInputDevice, m_InputDeviceDropDownState, s_InputDeviceDropDownScrollRegion);
+	RenderDeviceDropDown(ExpandedArea, BcLocalize("Microphone"), 1, g_Config.m_BcVoiceChatInputDevice, m_InputDeviceDropDownState, s_InputDeviceDropDownScrollRegion);
 	AddExpandedSpacing(5.0f);
-	RenderDeviceDropDown(ExpandedArea, Localize("Headphones"), 0, g_Config.m_BcVoiceChatOutputDevice, m_OutputDeviceDropDownState, s_OutputDeviceDropDownScrollRegion);
+	RenderDeviceDropDown(ExpandedArea, BcLocalize("Headphones"), 0, g_Config.m_BcVoiceChatOutputDevice, m_OutputDeviceDropDownState, s_OutputDeviceDropDownScrollRegion);
 
 	AddExpandedSpacing(6.0f);
 	if(AddExpandedRow(16.0f, Row))
 	{
 		char aStatus[256];
 		str_format(aStatus, sizeof(aStatus), "%s: %s",
-			Localize("Status"),
-			m_Registered ? Localize("Connected") : Localize("Offline"));
+			BcLocalize("Status"),
+			m_Registered ? BcLocalize("Connected") : BcLocalize("Offline"));
 		Ui()->DoLabel(&Row, aStatus, 12.0f, TEXTALIGN_ML);
 	}
 
 	AddExpandedSpacing(4.0f);
 	if(AddExpandedRow(22.0f, Row))
 	{
-		if(GameClient()->m_Menus.DoButton_Menu(&m_ReloadServerListButton, Localize("Reload servers"), 0, &Row))
+		if(GameClient()->m_Menus.DoButton_Menu(&m_ReloadServerListButton, BcLocalize("Reload servers"), 0, &Row))
 			ReloadServerList();
 	}
 
 	AddExpandedSpacing(5.0f);
 	if(AddExpandedRow(16.0f, Row))
-		Ui()->DoLabel(&Row, Localize("Available servers"), 14.0f, TEXTALIGN_ML);
+		Ui()->DoLabel(&Row, BcLocalize("Available servers"), 14.0f, TEXTALIGN_ML);
 	AddExpandedSpacing(2.0f);
 
 	const int ServerCount = (int)m_vServerEntries.size();
 	const int VisibleRows = std::clamp(ServerCount > 0 ? ServerCount : 1, 1, 2);
-	const int RowsToRender = minimum(ServerCount, VisibleRows);
-	const float ServerListHeight = 2.0f + VisibleRows * kVoiceMenuServerRowHeight + maximum(0, VisibleRows - 1) * kVoiceMenuServerRowGap;
+	const int RowsToRender = std::min(ServerCount, VisibleRows);
+	const float ServerListHeight = 2.0f + VisibleRows * kVoiceMenuServerRowHeight + std::max(0, VisibleRows - 1) * kVoiceMenuServerRowGap;
 	CUIRect ServerListView;
 	if(AddExpandedRow(ServerListHeight, ServerListView))
 	{
@@ -1292,7 +1295,7 @@ void CVoiceChat::RenderMenuSettingsBlock(const CUIRect &View, float RevealPhase)
 			CUIRect EmptyRow;
 			ServerListView.HSplitTop(kVoiceMenuServerRowHeight, &EmptyRow, &ServerListView);
 			const bool IsLoadingServerList = m_pServerListTask && !m_pServerListTask->Done();
-			Ui()->DoLabel(&EmptyRow, IsLoadingServerList ? Localize("Loading server list...") : Localize("No servers loaded"), 12.0f, TEXTALIGN_ML);
+			Ui()->DoLabel(&EmptyRow, IsLoadingServerList ? BcLocalize("Loading server list...") : BcLocalize("No servers loaded"), 12.0f, TEXTALIGN_ML);
 		}
 		else
 		{
@@ -1318,16 +1321,16 @@ void CVoiceChat::RenderMenuSettingsBlock(const CUIRect &View, float RevealPhase)
 
 	AddExpandedSpacing(5.0f);
 	if(AddExpandedRow(16.0f, Row))
-		Ui()->DoLabel(&Row, Localize("Voice commands"), 12.0f, TEXTALIGN_ML);
+		Ui()->DoLabel(&Row, BcLocalize("Voice commands"), 12.0f, TEXTALIGN_ML);
 	AddExpandedSpacing(2.0f);
 	if(AddExpandedRow(14.0f, Row))
-		Ui()->DoLabel(&Row, Localize("!vmute \"name\" / !vunmute \"name\""), 11.0f, TEXTALIGN_ML);
+		Ui()->DoLabel(&Row, BcLocalize("!vmute \"name\" / !vunmute \"name\""), 11.0f, TEXTALIGN_ML);
 	AddExpandedSpacing(2.0f);
 	if(AddExpandedRow(14.0f, Row))
-		Ui()->DoLabel(&Row, Localize("!volume \"name\" 0-100"), 11.0f, TEXTALIGN_ML);
+		Ui()->DoLabel(&Row, BcLocalize("!volume \"name\" 0-100"), 11.0f, TEXTALIGN_ML);
 	AddExpandedSpacing(2.0f);
 	if(AddExpandedRow(14.0f, Row))
-		Ui()->DoLabel(&Row, Localize("!vradius on/off/<tiles>"), 11.0f, TEXTALIGN_ML);
+		Ui()->DoLabel(&Row, BcLocalize("!vradius on/off/<tiles>"), 11.0f, TEXTALIGN_ML);
 }
 
 bool CVoiceChat::TryHandleChatCommand(const char *pLine)
@@ -1362,8 +1365,6 @@ bool CVoiceChat::TryHandleChatCommand(const char *pLine)
 		return true;
 	};
 
-	// Matches a command keyword at the start of the line and advances p past it.
-	// Returns false (without consuming) if the keyword doesn't match a whole token.
 	auto MatchCommand = [&](const char *pCommand) -> bool {
 		const int Len = str_length(pCommand);
 		if(str_comp_nocase_num(p, pCommand, Len) != 0)
@@ -1625,8 +1626,8 @@ CUIRect CVoiceChat::GetHudMuteStatusIndicatorRect(float HudWidth, float HudHeigh
 	const float Padding = 2.6f * Scale;
 	const float BoxWidth = IconSize * 2.0f + Gap + Padding * 2.0f;
 	CUIRect Rect = {
-		std::clamp(Layout.m_X, 0.0f, maximum(0.0f, HudWidth - BoxWidth)),
-		std::clamp(Layout.m_Y, 0.0f, maximum(0.0f, HudHeight - BoxHeight)),
+		std::clamp(Layout.m_X, 0.0f, std::max(0.0f, HudWidth - BoxWidth)),
+		std::clamp(Layout.m_Y, 0.0f, std::max(0.0f, HudHeight - BoxHeight)),
 		BoxWidth,
 		BoxHeight};
 	const bool MusicPlayerComponentDisabled = false;
@@ -1639,8 +1640,8 @@ CUIRect CVoiceChat::GetHudMuteStatusIndicatorRect(float HudWidth, float HudHeigh
 		Rect.y += Offset.y;
 	}
 
-	Rect.x = std::clamp(Rect.x, 0.0f, maximum(0.0f, HudWidth - Rect.w));
-	Rect.y = std::clamp(Rect.y, 0.0f, maximum(0.0f, HudHeight - Rect.h));
+	Rect.x = std::clamp(Rect.x, 0.0f, std::max(0.0f, HudWidth - Rect.w));
+	Rect.y = std::clamp(Rect.y, 0.0f, std::max(0.0f, HudHeight - Rect.h));
 	return Rect;
 }
 
@@ -1694,12 +1695,12 @@ void CVoiceChat::RenderHudTalkingIndicator(float HudWidth, float HudHeight, bool
 		const float IconSize = 4.4f * Scale;
 		const float IconWidth = 6.8f * Scale;
 		const float BoxWidth = 58.0f * Scale;
-		const int RenderCount = minimum((int)vPreviewEntries.size(), 2);
-		const float BoxHeight = RenderCount * RowHeight + maximum(0, RenderCount - 1) * RowGap;
+		const int RenderCount = std::min((int)vPreviewEntries.size(), 2);
+		const float BoxHeight = RenderCount * RowHeight + std::max(0, RenderCount - 1) * RowGap;
 		float DrawX = Layout.m_X;
 		float DrawY = Layout.m_Y;
-		DrawX = std::clamp(DrawX, 0.0f, maximum(0.0f, HudWidth - BoxWidth));
-		DrawY = std::clamp(DrawY, 0.0f, maximum(0.0f, HudHeight - BoxHeight));
+		DrawX = std::clamp(DrawX, 0.0f, std::max(0.0f, HudWidth - BoxWidth));
+		DrawY = std::clamp(DrawY, 0.0f, std::max(0.0f, HudHeight - BoxHeight));
 
 		const bool BackgroundEnabled = Layout.m_BackgroundEnabled;
 		const ColorRGBA BackgroundColor = VoiceHudThemeColor(GameClient(), color_cast<ColorRGBA>(ColorHSLA(Layout.m_BackgroundColor, true)), ForcePreview, 1.0f);
@@ -1744,7 +1745,7 @@ void CVoiceChat::RenderHudTalkingIndicator(float HudWidth, float HudHeight, bool
 
 			float NameFontSize = 6.0f * Scale;
 			const float MinNameFontSize = 3.5f * Scale;
-			const float MaxNameWidth = maximum(0.0f, MicX - MainX - 1.0f * Scale);
+			const float MaxNameWidth = std::max(0.0f, MicX - MainX - 1.0f * Scale);
 			while(NameFontSize > MinNameFontSize && TextRender()->TextWidth(NameFontSize, aName, -1, -1.0f) > MaxNameWidth)
 				NameFontSize -= 0.25f * Scale;
 
@@ -1785,12 +1786,12 @@ void CVoiceChat::RenderHudTalkingIndicator(float HudWidth, float HudHeight, bool
 	const float IconSize = 4.4f * Scale;
 	const float IconWidth = 6.8f * Scale;
 	const float BoxWidth = 58.0f * Scale;
-	const int RenderCount = minimum((int)vEntries.size(), ForcePreview ? 2 : 5);
-	const float BoxHeight = RenderCount * RowHeight + maximum(0, RenderCount - 1) * RowGap;
+	const int RenderCount = std::min((int)vEntries.size(), ForcePreview ? 2 : 5);
+	const float BoxHeight = RenderCount * RowHeight + std::max(0, RenderCount - 1) * RowGap;
 	float DrawX = Layout.m_X;
 	float DrawY = Layout.m_Y;
-	DrawX = std::clamp(DrawX, 0.0f, maximum(0.0f, HudWidth - BoxWidth));
-	DrawY = std::clamp(DrawY, 0.0f, maximum(0.0f, HudHeight - BoxHeight));
+	DrawX = std::clamp(DrawX, 0.0f, std::max(0.0f, HudWidth - BoxWidth));
+	DrawY = std::clamp(DrawY, 0.0f, std::max(0.0f, HudHeight - BoxHeight));
 
 	const bool BackgroundEnabled = Layout.m_BackgroundEnabled;
 	const ColorRGBA BackgroundColor = VoiceHudThemeColor(GameClient(), color_cast<ColorRGBA>(ColorHSLA(Layout.m_BackgroundColor, true)), ForcePreview, 1.0f);
@@ -1837,7 +1838,7 @@ void CVoiceChat::RenderHudTalkingIndicator(float HudWidth, float HudHeight, bool
 
 		float NameFontSize = 6.0f * Scale;
 		const float MinNameFontSize = 3.5f * Scale;
-		const float MaxNameWidth = maximum(0.0f, MicX - MainX - 1.0f * Scale);
+		const float MaxNameWidth = std::max(0.0f, MicX - MainX - 1.0f * Scale);
 		while(NameFontSize > MinNameFontSize && TextRender()->TextWidth(NameFontSize, aName, -1, -1.0f) > MaxNameWidth)
 			NameFontSize -= 0.25f * Scale;
 
@@ -1872,7 +1873,7 @@ CUIRect CVoiceChat::GetHudTalkingIndicatorRect(float HudWidth, float HudHeight, 
 		return CUIRect{0.0f, 0.0f, 0.0f, 0.0f};
 
 	const std::vector<STalkingEntry> &vEntries = m_vTalkingEntries;
-	const int EntryCount = ForcePreview ? 2 : minimum((int)vEntries.size(), 5);
+	const int EntryCount = ForcePreview ? 2 : std::min((int)vEntries.size(), 5);
 	if(!ForcePreview && EntryCount <= 0)
 		return CUIRect{0.0f, 0.0f, 0.0f, 0.0f};
 
@@ -1881,8 +1882,8 @@ CUIRect CVoiceChat::GetHudTalkingIndicatorRect(float HudWidth, float HudHeight, 
 	const float RowHeight = 12.0f * Scale;
 	const float RowGap = 0.8f * Scale;
 	const float BoxWidth = 58.0f * Scale;
-	const float BoxHeight = EntryCount * RowHeight + maximum(0, EntryCount - 1) * RowGap;
-	return {std::clamp(Layout.m_X, 0.0f, maximum(0.0f, HudWidth - BoxWidth)), std::clamp(Layout.m_Y, 0.0f, maximum(0.0f, HudHeight - BoxHeight)), BoxWidth, BoxHeight};
+	const float BoxHeight = EntryCount * RowHeight + std::max(0, EntryCount - 1) * RowGap;
+	return {std::clamp(Layout.m_X, 0.0f, std::max(0.0f, HudWidth - BoxWidth)), std::clamp(Layout.m_Y, 0.0f, std::max(0.0f, HudHeight - BoxHeight)), BoxWidth, BoxHeight};
 }
 
 void CVoiceChat::StartVoice()
@@ -1953,10 +1954,15 @@ bool CVoiceChat::OpenNetworking()
 	m_SecondarySendSequence = 0;
 	m_SecondaryHelloResetPending = false;
 	m_AdvertisedTeam = std::numeric_limits<int>::min();
+	m_ClientInstanceId = RandomUuid();
+	mem_zero(m_LinkToken, sizeof(m_LinkToken));
+	m_HasLinkToken = false;
+	m_OfficialRejected = false;
 	m_SecondaryAdvertisedTeam = std::numeric_limits<int>::min();
 	m_SecondaryAdvertisedRoomKey.clear();
 	m_SecondaryAdvertisedPlayerName.clear();
 	m_SecondaryAdvertisedGameClientId = BestClientVoice::INVALID_GAME_CLIENT_ID - 1;
+	m_SecondaryClientInstanceId = UUID_ZEROED;
 	return true;
 }
 
@@ -1977,7 +1983,9 @@ void CVoiceChat::CloseNetworking()
 	m_AdvertisedPlayerName.clear();
 	m_AdvertisedGameClientId = BestClientVoice::INVALID_GAME_CLIENT_ID - 1;
 	m_AdvertisedTeam = std::numeric_limits<int>::min();
-	// Reset mod state on disconnect
+	m_ClientInstanceId = UUID_ZEROED;
+	mem_zero(m_LinkToken, sizeof(m_LinkToken));
+	m_HasLinkToken = false;
 	m_ModAuthed = false;
 	m_ModAuthFailed = false;
 	m_ModAuthPending = false;
@@ -2014,6 +2022,7 @@ bool CVoiceChat::OpenSecondaryNetworking()
 	m_SecondaryAdvertisedRoomKey.clear();
 	m_SecondaryAdvertisedGameClientId = BestClientVoice::INVALID_GAME_CLIENT_ID - 1;
 	m_SecondaryAdvertisedTeam = std::numeric_limits<int>::min();
+	m_SecondaryClientInstanceId = RandomUuid();
 	return true;
 }
 
@@ -2035,6 +2044,7 @@ void CVoiceChat::CloseSecondaryNetworking()
 	m_SecondaryAdvertisedPlayerName.clear();
 	m_SecondaryAdvertisedGameClientId = BestClientVoice::INVALID_GAME_CLIENT_ID - 1;
 	m_SecondaryAdvertisedTeam = std::numeric_limits<int>::min();
+	m_SecondaryClientInstanceId = UUID_ZEROED;
 }
 
 void CVoiceChat::CloseServerListPingSocket()
@@ -2055,9 +2065,6 @@ void CVoiceChat::CloseServerListPingSocket()
 
 bool CVoiceChat::OpenAudioDevices()
 {
-	if(!Sound()->IsSoundEnabled())
-		return false;
-
 	if(SDL_WasInit(SDL_INIT_AUDIO) == 0)
 	{
 #ifndef SDL_HINT_AUDIO_INCLUDE_MONITORS
@@ -2090,7 +2097,6 @@ bool CVoiceChat::OpenAudioDevices()
 	}
 	else if(CaptureDeviceCount == 0)
 	{
-		// Keep voice chat usable for playback when the system has no microphone.
 		dbg_msg("voice", "no capture devices available, voice transmit disabled");
 	}
 	else
@@ -2207,7 +2213,7 @@ void CVoiceChat::TuneEncoderForNetwork()
 			continue;
 
 		LossAvg += std::clamp(Peer.m_LossEwma, 0.0f, 1.0f);
-		JitterMax = maximum(JitterMax, Peer.m_JitterMs);
+		JitterMax = std::max(JitterMax, Peer.m_JitterMs);
 		++ActivePeerCount;
 	}
 	if(ActivePeerCount > 0)
@@ -2273,32 +2279,28 @@ void CVoiceChat::ClearPeerState()
 
 void CVoiceChat::SendHello()
 {
-	if(!m_Socket || !m_HasServerAddr)
+	if(!m_Socket || !m_HasServerAddr || m_OfficialRejected)
 		return;
 
 	const std::string RoomKey = CurrentRoomKey();
 	const int LocalClientId = LocalGameClientId();
 	const int VoiceTeam = LocalVoiceTeam();
 	const uint64_t AuthTimestamp = CurrentHelloAuthTimestamp();
-	const uint16_t RoomKeySize = (uint16_t)minimum<size_t>(RoomKey.size(), BestClientVoice::MAX_ROOM_KEY_LENGTH);
+	const uint16_t RoomKeySize = (uint16_t)std::min<size_t>(RoomKey.size(), BestClientVoice::MAX_ROOM_KEY_LENGTH);
 
-	// Build hello body (without HMAC — server will challenge us)
 	std::vector<uint8_t> vBody;
 	vBody.reserve(20 + RoomKeySize + 2 + BestClientVoice::MAX_PLAYER_NAME_LENGTH);
-	BestClientVoice::WriteU16(vBody, BESTCLIENT_VERSIONNR);
+	BestClientVoice::WriteU16(vBody, (uint16_t)BestClientVoice::CLIENT_BUILD);
 	BestClientVoice::WriteU16(vBody, RoomKeySize);
 	vBody.insert(vBody.end(), RoomKey.begin(), RoomKey.begin() + RoomKeySize);
 	BestClientVoice::WriteS16(vBody, (int16_t)LocalClientId);
 	BestClientVoice::WriteS16(vBody, (int16_t)VoiceTeam);
 	BestClientVoice::WriteU64(vBody, AuthTimestamp);
-	// Append optional player name (new protocol extension; ignored by old servers)
+	const char *pName = nullptr;
 	if(LocalClientId >= 0 && LocalClientId < MAX_CLIENTS)
-	{
-		const char *pName = GameClient()->m_aClients[LocalClientId].m_aName;
-		WriteVoiceString(vBody, pName, BestClientVoice::MAX_PLAYER_NAME_LENGTH);
-	}
+		pName = GameClient()->m_aClients[LocalClientId].m_aName;
+	AppendHelloIdentity(vBody, LocalClientId, pName, m_ClientInstanceId, BestClientVoice::HELLO_CHANNEL_PRIMARY, nullptr);
 
-	// Save for PACKET_HELLO_RESPONSE
 	m_PendingHelloPayload = vBody;
 	m_ChallengeActive = false;
 
@@ -2321,28 +2323,27 @@ void CVoiceChat::SendHello()
 
 void CVoiceChat::SendHelloSecondary()
 {
-	if(!m_SecondarySocket || !m_HasServerAddr)
+	if(!m_SecondarySocket || !m_HasServerAddr || !m_HasLinkToken || m_OfficialRejected)
 		return;
 
 	const std::string RoomKey = CurrentRoomKey();
 	const int LocalClientId = LocalGameClientId();
 	const int VoiceTeam = LocalOwnVoiceTeam();
 	const uint64_t AuthTimestamp = CurrentHelloAuthTimestamp();
-	const uint16_t RoomKeySize = (uint16_t)minimum<size_t>(RoomKey.size(), BestClientVoice::MAX_ROOM_KEY_LENGTH);
+	const uint16_t RoomKeySize = (uint16_t)std::min<size_t>(RoomKey.size(), BestClientVoice::MAX_ROOM_KEY_LENGTH);
 
 	std::vector<uint8_t> vBody;
 	vBody.reserve(20 + RoomKeySize + 2 + BestClientVoice::MAX_PLAYER_NAME_LENGTH);
-	BestClientVoice::WriteU16(vBody, BESTCLIENT_VERSIONNR);
+	BestClientVoice::WriteU16(vBody, (uint16_t)BestClientVoice::CLIENT_BUILD);
 	BestClientVoice::WriteU16(vBody, RoomKeySize);
 	vBody.insert(vBody.end(), RoomKey.begin(), RoomKey.begin() + RoomKeySize);
 	BestClientVoice::WriteS16(vBody, (int16_t)LocalClientId);
 	BestClientVoice::WriteS16(vBody, (int16_t)VoiceTeam);
 	BestClientVoice::WriteU64(vBody, AuthTimestamp);
+	const char *pName = nullptr;
 	if(LocalClientId >= 0 && LocalClientId < MAX_CLIENTS)
-	{
-		const char *pName = GameClient()->m_aClients[LocalClientId].m_aName;
-		WriteVoiceString(vBody, pName, BestClientVoice::MAX_PLAYER_NAME_LENGTH);
-	}
+		pName = GameClient()->m_aClients[LocalClientId].m_aName;
+	AppendHelloIdentity(vBody, LocalClientId, pName, m_SecondaryClientInstanceId, BestClientVoice::HELLO_CHANNEL_SECONDARY, m_LinkToken);
 
 	m_SecondaryPendingHelloPayload = vBody;
 	m_SecondaryChallengeActive = false;
@@ -2371,7 +2372,6 @@ void CVoiceChat::SendHelloResponse(NETSOCKET Socket, const uint8_t *pNonce, cons
 
 	const std::string AuthKey = VoiceAuthKey();
 
-	// Build message: nonce ‖ hello_payload — HMAC input
 	std::vector<uint8_t> vHmacInput;
 	vHmacInput.reserve(BestClientVoice::CHALLENGE_NONCE_SIZE + vHelloPayload.size());
 	vHmacInput.insert(vHmacInput.end(), pNonce, pNonce + BestClientVoice::CHALLENGE_NONCE_SIZE);
@@ -2379,14 +2379,16 @@ void CVoiceChat::SendHelloResponse(NETSOCKET Socket, const uint8_t *pNonce, cons
 
 	const SHA256_DIGEST Proof = BestClientIndicator::ComputeHmacSha256(
 		AuthKey.c_str(), vHmacInput.data(), (int)vHmacInput.size());
+	const SHA256_DIGEST OfficialProof = BestClientIndicator::ComputeHmacSha256(
+		BESTCLIENT_OFFICIAL_CODE, vHmacInput.data(), (int)vHmacInput.size());
 
-	// PACKET_HELLO_RESPONSE: header + [u16 hello_payload_len] + hello_payload + [32-byte HMAC]
 	std::vector<uint8_t> vPacket;
-	vPacket.reserve(8 + 2 + vHelloPayload.size() + SHA256_DIGEST_LENGTH);
+	vPacket.reserve(8 + 2 + vHelloPayload.size() + SHA256_DIGEST_LENGTH * 2);
 	BestClientVoice::WriteHeader(vPacket, BestClientVoice::PACKET_HELLO_RESPONSE);
 	BestClientVoice::WriteU16(vPacket, (uint16_t)vHelloPayload.size());
 	vPacket.insert(vPacket.end(), vHelloPayload.begin(), vHelloPayload.end());
 	vPacket.insert(vPacket.end(), Proof.data, Proof.data + SHA256_DIGEST_LENGTH);
+	vPacket.insert(vPacket.end(), OfficialProof.data, OfficialProof.data + SHA256_DIGEST_LENGTH);
 
 	net_udp_send(Socket, &m_ServerAddr, vPacket.data(), (int)vPacket.size());
 }
@@ -2417,9 +2419,6 @@ void CVoiceChat::VoiceModAuth(const char *pKey)
 {
 	if(!m_Socket || !m_HasServerAddr || !m_Registered)
 		return;
-	// Store key locally — it is NEVER sent over the network.
-	// We send only a challenge request; the server replies with a nonce
-	// and we prove knowledge of the key via HMAC-SHA256(nonce, key).
 	m_PendingModKey = pKey;
 	m_ModAuthPending = true;
 	m_ModAuthFailed = false;
@@ -2517,7 +2516,6 @@ void CVoiceChat::ProcessVoiceRelayPacket(const uint8_t *pRawData, int DataSize, 
 	{
 		if((int)m_Peers.size() >= BestClientVoice::MAX_VOICE_PEERS)
 			return;
-		// Recover quickly even if peer-list packets are delayed/lost for a while.
 		CRemotePeer &NewPeer = m_Peers[SenderId];
 		NewPeer.m_LastReceiveTick = time_get();
 		m_PeerVolumePercent.emplace(SenderId, 100);
@@ -2533,8 +2531,6 @@ void CVoiceChat::ProcessVoiceRelayPacket(const uint8_t *pRawData, int DataSize, 
 	Peer.m_Position = vec2((float)PosX, (float)PosY);
 	if(!IsVoiceTeamAudible(Team))
 	{
-		// Ignore packets from channels we are not subscribed to, but keep decoder state for
-		// the active channel to avoid breaking dual-stream team0 + own-team reception.
 		return;
 	}
 
@@ -2585,7 +2581,7 @@ void CVoiceChat::ProcessVoiceRelayPacket(const uint8_t *pRawData, int DataSize, 
 		const uint16_t Expected = (uint16_t)(Peer.m_LastSequence + 1);
 		const uint16_t MissingPackets = (uint16_t)(Sequence - Expected);
 		const int DeltaPackets = (int)MissingPackets + 1;
-		const float LossRatio = std::clamp(MissingPackets / (float)maximum(DeltaPackets, 1), 0.0f, 1.0f);
+		const float LossRatio = std::clamp(MissingPackets / (float)std::max(DeltaPackets, 1), 0.0f, 1.0f);
 		Peer.m_LossEwma = Peer.m_LossEwma <= 0.0f ? LossRatio : (0.9f * Peer.m_LossEwma + 0.1f * LossRatio);
 		if(MissingPackets > 0)
 		{
@@ -2598,7 +2594,6 @@ void CVoiceChat::ProcessVoiceRelayPacket(const uint8_t *pRawData, int DataSize, 
 			}
 			else
 			{
-				// If only one packet is missing, attempt Opus in-band FEC from the current packet.
 				if(MissingPackets == 1)
 				{
 					const int FecSamples = opus_decode(Peer.m_pDecoder, pRawData + Offset, OpusSize, aDecoded, BestClientVoice::FRAME_SIZE, 1);
@@ -2677,9 +2672,20 @@ void CVoiceChat::ProcessNetwork()
 			continue;
 		m_LastServerPacketTick = time_get();
 
+		if(Type == BestClientVoice::PACKET_AUTH_REJECT)
+		{
+			uint8_t Reason = 0;
+			if(!BestClientVoice::ReadU8(pRawData, DataSize, Offset, Reason))
+				continue;
+			if(Reason == BestClientVoice::AUTH_REJECT_UNOFFICIAL)
+				m_OfficialRejected = true;
+			continue;
+		}
+
 		if(Type == BestClientVoice::PACKET_HELLO_CHALLENGE)
 		{
-			// Server is challenging us — read nonce and send HMAC response
+			if(m_OfficialRejected)
+				continue;
 			if((int)(Offset + BestClientVoice::CHALLENGE_NONCE_SIZE) > DataSize)
 				continue;
 			mem_copy(m_ChallengeNonce, pRawData + Offset, BestClientVoice::CHALLENGE_NONCE_SIZE);
@@ -2691,8 +2697,15 @@ void CVoiceChat::ProcessNetwork()
 		if(Type == BestClientVoice::PACKET_HELLO_ACK)
 		{
 			uint16_t VoiceId = 0;
-			if(BestClientVoice::ReadU16(pRawData, DataSize, Offset, VoiceId))
+			uint16_t ServerFlags = 0;
+			if(BestClientVoice::ReadU16(pRawData, DataSize, Offset, VoiceId) && BestClientVoice::ReadU16(pRawData, DataSize, Offset, ServerFlags))
 			{
+				(void)ServerFlags;
+				if(Offset + BestClientVoice::LINK_TOKEN_SIZE <= DataSize)
+				{
+					mem_copy(m_LinkToken, pRawData + Offset, BestClientVoice::LINK_TOKEN_SIZE);
+					m_HasLinkToken = true;
+				}
 				const bool FullReset = m_HelloResetPending || !m_Registered || (m_ClientVoiceId != 0 && m_ClientVoiceId != VoiceId);
 				if(FullReset)
 				{
@@ -2813,11 +2826,8 @@ void CVoiceChat::ProcessNetwork()
 			continue;
 		}
 
-		// Moderator control packets
 		if(Type == BestClientVoice::PACKET_MOD_AUTH_CHALLENGE)
 		{
-			// Server sent a nonce — respond with HMAC-SHA256(nonce, mod_key)
-			// The raw key is never sent over the network
 			if(!m_ModAuthPending || m_PendingModKey.empty())
 				continue;
 			if(DataSize - Offset < BestClientVoice::MOD_NONCE_SIZE)
@@ -2826,7 +2836,7 @@ void CVoiceChat::ProcessNetwork()
 
 			const SHA256_DIGEST Proof = BestClientIndicator::ComputeHmacSha256(
 				m_PendingModKey.c_str(), pNonce, BestClientVoice::MOD_NONCE_SIZE);
-			m_PendingModKey.clear(); // key no longer needed; erase from memory
+			m_PendingModKey.clear();
 
 			std::vector<uint8_t> vResp;
 			vResp.reserve(6 + SHA256_DIGEST_LENGTH);
@@ -2847,7 +2857,7 @@ void CVoiceChat::ProcessNetwork()
 				{
 					m_ModAuthed = true;
 					m_ModAuthFailed = false;
-					m_LastModPlayerListReqTick = 0; // trigger immediate refresh
+					m_LastModPlayerListReqTick = 0;
 				}
 				else
 				{
@@ -2917,7 +2927,6 @@ void CVoiceChat::ProcessNetwork()
 		{
 			const int64_t NowTick = time_get();
 			m_IsMutedByMod = true;
-			// Show chat notification at most once every 3 seconds to avoid spam
 			if(m_MutedByModNotifyTick == 0 || NowTick - m_MutedByModNotifyTick > time_freq() * 3)
 			{
 				m_MutedByModNotifyTick = NowTick;
@@ -2960,8 +2969,20 @@ void CVoiceChat::ProcessSecondaryNetwork()
 			continue;
 		m_SecondaryLastServerPacketTick = time_get();
 
+		if(Type == BestClientVoice::PACKET_AUTH_REJECT)
+		{
+			uint8_t Reason = 0;
+			if(!BestClientVoice::ReadU8(pRawData, DataSize, Offset, Reason))
+				continue;
+			if(Reason == BestClientVoice::AUTH_REJECT_UNOFFICIAL)
+				m_OfficialRejected = true;
+			continue;
+		}
+
 		if(Type == BestClientVoice::PACKET_HELLO_CHALLENGE)
 		{
+			if(m_OfficialRejected)
+				continue;
 			if((int)(Offset + BestClientVoice::CHALLENGE_NONCE_SIZE) > DataSize)
 				continue;
 			mem_copy(m_SecondaryChallengeNonce, pRawData + Offset, BestClientVoice::CHALLENGE_NONCE_SIZE);
@@ -3159,7 +3180,7 @@ void CVoiceChat::ProcessCapture()
 		{
 			const int Scaled = (aFrameRaw[i] * MicGainPercent) / 100;
 			aScaled[i] = Scaled;
-			PeakBeforeLimiter = maximum(PeakBeforeLimiter, absolute(Scaled));
+			PeakBeforeLimiter = std::max(PeakBeforeLimiter, absolute(Scaled));
 		}
 		const int TargetPeak = 30000;
 		const float RequiredLimiterScale = (PeakBeforeLimiter > TargetPeak && PeakBeforeLimiter > 0) ? (TargetPeak / (float)PeakBeforeLimiter) : 1.0f;
@@ -3174,15 +3195,12 @@ void CVoiceChat::ProcessCapture()
 		{
 			const int Out = round_to_int(aScaled[i] * m_MicLimiterGain);
 			aFrame[i] = (int16_t)std::clamp(Out, (int)std::numeric_limits<int16_t>::min(), (int)std::numeric_limits<int16_t>::max());
-			Peak = maximum(Peak, absolute(Out));
+			Peak = std::max(Peak, absolute(Out));
 		}
 
 		const bool AutoMode = g_Config.m_BcVoiceChatActivationMode == 0;
 		if(AutoMode)
 		{
-			// Keep the pre-compressor Peak for the VAD threshold comparison below:
-			// ApplyAutoHpfCompressor hard-limits its output to 50% of full scale, which would
-			// otherwise make the upper half of the VAD threshold slider (50-100%) unreachable.
 			ApplyAutoNoiseSuppressorSimple(aFrame, BestClientVoice::FRAME_SIZE, 0.50f, m_AutoNsNoiseFloor, m_AutoNsGate);
 			ApplyAutoHpfCompressor(aFrame, BestClientVoice::FRAME_SIZE, m_AutoHpfPrevIn, m_AutoHpfPrevOut, m_AutoCompEnv);
 		}
@@ -3210,7 +3228,22 @@ void CVoiceChat::ProcessCapture()
 
 		if(!ShouldTransmit())
 		{
-			m_WasTransmitActive = false;
+			if(m_OfficialRejected)
+			{
+				bool Attempt = false;
+				if(g_Config.m_BcVoiceChatActivationMode == 1)
+					Attempt = m_PushToTalkPressed;
+				else
+				{
+					const float VadThreshold = std::clamp(g_Config.m_BcVoiceChatVadThreshold / 100.0f, 0.0f, 1.0f);
+					Attempt = VadThreshold <= 0.0f || PeakLinear >= VadThreshold;
+				}
+				if(Attempt && !m_WasTransmitActive)
+					NotifyUnofficialTalkAttempt();
+				m_WasTransmitActive = Attempt;
+			}
+			else
+				m_WasTransmitActive = false;
 			m_AutoActivationUntilTick = 0;
 			m_AutoNsNoiseFloor = 0.0f;
 			m_AutoNsGate = 1.0f;
@@ -3236,9 +3269,7 @@ void CVoiceChat::ProcessCapture()
 			if(Trigger)
 			{
 				Active = true;
-				// Always land in the future (even with 0ms release delay) so IsClientTalking(),
-				// which requires m_AutoActivationUntilTick > 0, reflects the current frame's activity.
-				m_AutoActivationUntilTick = NowTick + maximum<int64_t>(VadReleaseTicks, 1);
+				m_AutoActivationUntilTick = NowTick + std::max<int64_t>(VadReleaseTicks, 1);
 			}
 			else if(VadReleaseTicks > 0 && m_AutoActivationUntilTick > 0 && NowTick <= m_AutoActivationUntilTick)
 			{
@@ -3323,13 +3354,10 @@ void CVoiceChat::ProcessPlayback()
 		const float MicCheckGain = g_Config.m_BcVoiceChatMicCheck ? 0.75f * MasterVolume : 0.0f;
 		if(MicCheckGain <= 0.0f)
 		{
-			m_MicMonitorPcm.DiscardFront(minimum(m_MicMonitorPcm.Size(), (size_t)BestClientVoice::FRAME_SIZE));
+			m_MicMonitorPcm.DiscardFront(std::min(m_MicMonitorPcm.Size(), (size_t)BestClientVoice::FRAME_SIZE));
 		}
 		else if(m_MicMonitorPcm.Size() >= (size_t)BestClientVoice::FRAME_SIZE)
 		{
-			// Only pop once a full frame has accumulated; popping a short frame and zero-padding
-			// the rest (as before) spliced silent gaps into the loopback whenever capture hadn't
-			// caught up yet, which is audible as choppy/glitchy playback.
 			int16_t aMicFrame[BestClientVoice::FRAME_SIZE] = {};
 			const size_t MicSamples = m_MicMonitorPcm.PopFront(aMicFrame, BestClientVoice::FRAME_SIZE);
 			for(size_t i = 0; i < MicSamples; ++i)
@@ -3378,7 +3406,7 @@ void CVoiceChat::ProcessPlayback()
 		{
 			const int64_t Sample = aMix[i];
 			const int64_t Abs = Sample < 0 ? -Sample : Sample;
-			Peak = maximum<int64_t>(Peak, Abs);
+			Peak = std::max<int64_t>(Peak, Abs);
 		}
 
 		const float ClipScale = Peak > (int)std::numeric_limits<int16_t>::max() ? ((float)std::numeric_limits<int16_t>::max() / (float)Peak) : 1.0f;
@@ -3547,6 +3575,17 @@ void CVoiceChat::RefreshTalkingCache()
 	m_TalkingStateDirty = false;
 }
 
+void CVoiceChat::NotifyUnofficialTalkAttempt()
+{
+	if(!m_OfficialRejected || g_Config.m_BcVoiceChatEnable == 0 || g_Config.m_BcVoiceChatMicMuted || IsInGameOnlyBlocked())
+		return;
+	const int64_t Now = time_get();
+	if(m_LastUnofficialNoticeTick != 0 && Now - m_LastUnofficialNoticeTick < time_freq())
+		return;
+	m_LastUnofficialNoticeTick = Now;
+	GameClient()->m_Chat.Echo(Localize("Voice chat is only for the original BestClient. Your client was detected as fake."));
+}
+
 bool CVoiceChat::ShouldTransmit() const
 {
 	if(!m_Registered)
@@ -3568,7 +3607,7 @@ bool CVoiceChat::IsInGameOnlyBlocked() const
 
 bool CVoiceChat::ShouldStartVoicePipeline(bool Online) const
 {
-	return Online && g_Config.m_BcVoiceChatEnable != 0 && Sound()->IsSoundEnabled();
+	return Online && g_Config.m_BcVoiceChatEnable != 0;
 }
 
 bool CVoiceChat::HasPendingPlaybackAudio() const
@@ -3607,7 +3646,7 @@ int CVoiceChat::LocalVoiceTeam() const
 
 int CVoiceChat::LocalOwnVoiceTeam() const
 {
-	return maximum(LocalTeam(), 0);
+	return std::max(LocalTeam(), 0);
 }
 
 bool CVoiceChat::IsUseTeam0Mode() const
@@ -3622,7 +3661,7 @@ bool CVoiceChat::IsEnableYourGroupMode() const
 
 bool CVoiceChat::IsVoiceTeamAudible(int Team) const
 {
-	const int NormalizedTeam = maximum(Team, 0);
+	const int NormalizedTeam = std::max(Team, 0);
 	const int OwnTeam = LocalOwnVoiceTeam();
 
 	if(IsUseTeam0Mode())
@@ -3769,6 +3808,25 @@ bool CVoiceChat::IsClientTalking(int ClientId) const
 	}
 
 	return false;
+}
+
+bool CVoiceChat::IsNameMuted(const char *pName) const
+{
+	const std::string Key = NormalizeVoiceNameKey(pName);
+	if(Key.empty())
+		return false;
+	return m_MutedNameKeys.find(Key) != m_MutedNameKeys.end();
+}
+
+int CVoiceChat::GetNameVolumePercent(const char *pName) const
+{
+	const std::string Key = NormalizeVoiceNameKey(pName);
+	if(Key.empty())
+		return 100;
+	const auto It = m_NameVolumePercent.find(Key);
+	if(It == m_NameVolumePercent.end())
+		return 100;
+	return std::clamp(It->second, 1, 100);
 }
 
 void CVoiceChat::FetchServerList()
@@ -3924,7 +3982,11 @@ void CVoiceChat::ConVoiceStatus(IConsole::IResult *pResult, void *pUserData)
 void CVoiceChat::ConKeyVoiceTalk(IConsole::IResult *pResult, void *pUserData)
 {
 	CVoiceChat *pSelf = static_cast<CVoiceChat *>(pUserData);
-	pSelf->m_PushToTalkPressed = pResult->GetInteger(0) != 0;
+	const bool Pressed = pResult->GetInteger(0) != 0;
+	const bool Started = Pressed && !pSelf->m_PushToTalkPressed;
+	pSelf->m_PushToTalkPressed = Pressed;
+	if(Started && g_Config.m_BcVoiceChatActivationMode == 1)
+		pSelf->NotifyUnofficialTalkAttempt();
 }
 
 void CVoiceChat::ConToggleVoiceMicMute(IConsole::IResult *pResult, void *pUserData)

@@ -2,7 +2,6 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "infomessages.h"
 
-#include <algorithm>
 #include <base/time.h>
 
 #include <engine/graphics.h>
@@ -14,7 +13,6 @@
 #include <generated/protocol.h>
 
 #include <game/client/animstate.h>
-#include <game/client/bc_ui_animations.h>
 #include <game/client/gameclient.h>
 #include <game/client/prediction/entities/character.h>
 #include <game/client/prediction/gameworld.h>
@@ -91,7 +89,9 @@ CInfoMessages::CInfoMsg CInfoMessages::CreateInfoMsg(EType Type)
 	CInfoMsg InfoMsg;
 	InfoMsg.m_Type = Type;
 	InfoMsg.m_Tick = Client()->GameTick(g_Config.m_ClDummy);
+	// bestclient
 	InfoMsg.m_AppearTime = time_get();
+	// bestclient
 
 	for(int i = 0; i < MAX_KILLMSG_TEAM_MEMBERS; i++)
 	{
@@ -133,16 +133,15 @@ void CInfoMessages::AddInfoMsg(const CInfoMsg &InfoMsg)
 	const float Height = 1.5f * 400.0f * 3.0f;
 	const float Width = Height * Graphics()->ScreenAspect();
 
-	float ScreenX0, ScreenY0, ScreenX1, ScreenY1;
-	Graphics()->GetScreen(&ScreenX0, &ScreenY0, &ScreenX1, &ScreenY1);
-	Graphics()->MapScreen(0, 0, Width, Height);
+	CScreenRect ScreenRect = Graphics()->GetScreen();
+	Graphics()->MapScreenToSize(Width, Height);
 
 	m_InfoMsgCurrent = (m_InfoMsgCurrent + 1) % MAX_INFOMSGS;
 	DeleteTextContainers(m_aInfoMsgs[m_InfoMsgCurrent]);
 	m_aInfoMsgs[m_InfoMsgCurrent] = InfoMsg;
 	CreateTextContainersIfNotCreated(m_aInfoMsgs[m_InfoMsgCurrent]);
 
-	Graphics()->MapScreen(ScreenX0, ScreenY0, ScreenX1, ScreenY1);
+	Graphics()->MapScreen(ScreenRect);
 }
 
 void CInfoMessages::CreateTextContainersIfNotCreated(CInfoMsg &InfoMsg)
@@ -237,7 +236,7 @@ void CInfoMessages::OnTeamKillMessage(const CNetMsg_Sv_KillMsgTeam *pMsg)
 	std::stable_sort(vStrongWeakSorted.begin(), vStrongWeakSorted.end(), [](auto &Left, auto &Right) { return Left.second > Right.second; });
 
 	CInfoMsg Kill = CreateInfoMsg(TYPE_KILL);
-	Kill.m_TeamSize = minimum<int>(vStrongWeakSorted.size(), MAX_KILLMSG_TEAM_MEMBERS);
+	Kill.m_TeamSize = std::min((int)vStrongWeakSorted.size(), (int)MAX_KILLMSG_TEAM_MEMBERS);
 
 	Kill.m_VictimDDTeam = pMsg->m_Team;
 	for(int i = 0; i < Kill.m_TeamSize; i++)
@@ -453,7 +452,7 @@ void CInfoMessages::OnRender()
 	const float Height = 1.5f * 400.0f * 3.0f;
 	const float Width = Height * Graphics()->ScreenAspect();
 
-	Graphics()->MapScreen(0, 0, Width, Height);
+	Graphics()->MapScreenToSize(Width, Height);
 	Graphics()->SetColor(1.0f, 1.0f, 1.0f, 1.0f);
 
 	int Showfps = g_Config.m_ClShowfps;
@@ -463,8 +462,10 @@ void CInfoMessages::OnRender()
 #endif
 	const float StartX = Width - 10.0f;
 	const float StartY = 30.0f + (Showfps ? 100.0f : 0.0f) + (g_Config.m_ClShowpred && Client()->State() != IClient::STATE_DEMOPLAYBACK ? 100.0f : 0.0f);
-	const int64_t Now = time_get();
 
+	// bestclient
+	const int64_t Now = time_get();
+	// bestclient
 	float y = StartY;
 	for(int i = 1; i <= MAX_INFOMSGS; i++)
 	{
@@ -479,37 +480,22 @@ void CInfoMessages::OnRender()
 			continue;
 		}
 
+		// bestclient
+		if(g_Config.m_ClFocusMode && g_Config.m_ClFocusModeHideUI)
+			continue;
+		// bestclient
+
 		CreateTextContainersIfNotCreated(InfoMsg);
 
 		if(InfoMsg.m_Type == EType::TYPE_KILL && g_Config.m_ClShowKillMessages)
 		{
-			float KillMsgSlideOffsetX = 0.0f;
-			if(BCUiAnimations::Enabled() && g_Config.m_BcKillfeedAnimation != 0 && g_Config.m_BcKillfeedAnimationMs > 0 && InfoMsg.m_AppearTime > 0)
-			{
-				const float Duration = BCUiAnimations::MsToSeconds(g_Config.m_BcKillfeedAnimationMs);
-				const float AgeSeconds = (Now - InfoMsg.m_AppearTime) / (float)time_freq();
-				const float AppearProgress = Duration > 0.0f ? std::clamp(AgeSeconds / Duration, 0.0f, 1.0f) : 1.0f;
-				const float AppearEase = BCUiAnimations::EaseInOutQuad(AppearProgress);
-
-				float KillMsgWidth = 0.0f;
-				if(InfoMsg.m_VictimTextContainerIndex.Valid())
-					KillMsgWidth += TextRender()->GetBoundingBoxTextContainer(InfoMsg.m_VictimTextContainerIndex).m_W;
-				KillMsgWidth += 24.0f;
-				KillMsgWidth += 44.0f * InfoMsg.m_TeamSize;
-				KillMsgWidth += 32.0f;
-				KillMsgWidth += 52.0f;
-				if(InfoMsg.m_aVictimIds[0] != InfoMsg.m_KillerId)
-				{
-					KillMsgWidth += 24.0f;
-					KillMsgWidth += 32.0f;
-					if(InfoMsg.m_KillerTextContainerIndex.Valid())
-						KillMsgWidth += TextRender()->GetBoundingBoxTextContainer(InfoMsg.m_KillerTextContainerIndex).m_W;
-				}
-
-				KillMsgSlideOffsetX = (1.0f - AppearEase) * (KillMsgWidth + 40.0f);
-			}
-
+			// bestclient
+			const float KillMsgSlideOffsetX = GameClient()->m_BcUiAnimations.KillfeedSlideOffsetX(
+				TextRender(), InfoMsg.m_AppearTime, Now,
+				InfoMsg.m_VictimTextContainerIndex, InfoMsg.m_KillerTextContainerIndex,
+				InfoMsg.m_TeamSize, InfoMsg.m_aVictimIds[0], InfoMsg.m_KillerId);
 			RenderKillMsg(InfoMsg, StartX + KillMsgSlideOffsetX, y);
+			// bestclient
 			y += ROW_HEIGHT;
 		}
 		else if(InfoMsg.m_Type == EType::TYPE_FINISH && g_Config.m_ClShowFinishMessages)

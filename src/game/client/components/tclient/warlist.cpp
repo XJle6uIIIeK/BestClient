@@ -18,7 +18,7 @@ void CWarList::OnConsoleInit()
 	if(pConfigManager)
 		pConfigManager->RegisterCallback(ConfigSaveCallback, this, ConfigDomain::TCLIENTWARLIST);
 
-	Console()->Register("update_war_group", "i[group_index] s[name] i[color] ?i[use_gradient] ?i[color2]", CFGFLAG_CLIENT, ConUpsertWarType, this, "Update or add a specific war group");
+	Console()->Register("update_war_group", "i[group_index] s[name] i[color]", CFGFLAG_CLIENT, ConUpsertWarType, this, "Update or add a specific war group");
 	Console()->Register("add_war_entry", "s[group] s[name] s[clan] r[reason]", CFGFLAG_CLIENT, ConAddWarEntry, this, "Adds a specific war entry");
 
 	Console()->Register("war_name", "s[group] s[name] ?r[reason]", CFGFLAG_CLIENT, ConName, this, "Add a name war entry");
@@ -120,12 +120,8 @@ void CWarList::ConUpsertWarType(IConsole::IResult *pResult, void *pUserData)
 	const char *pType = pResult->GetString(1);
 	unsigned int ColorInt = pResult->GetInteger(2);
 	ColorRGBA Color = color_cast<ColorRGBA>(ColorHSLA(ColorInt));
-	bool UseGradient = pResult->NumArguments() > 3 && pResult->GetInteger(3) != 0;
-	ColorRGBA Color2 = Color;
-	if(pResult->NumArguments() > 4)
-		Color2 = color_cast<ColorRGBA>(ColorHSLA((unsigned int)pResult->GetInteger(4)));
 	CWarList *pThis = static_cast<CWarList *>(pUserData);
-	pThis->UpsertWarType(Index, pType, Color, UseGradient, Color2);
+	pThis->UpsertWarType(Index, pType, Color);
 }
 
 void CWarList::AddWarEntryInGame(int WarType, const char *pName, const char *pReason, bool IsClan)
@@ -222,7 +218,7 @@ void CWarList::UpdateWarEntry(int Index, const char *pName, const char *pClan, c
 	}
 }
 
-void CWarList::UpsertWarType(int Index, const char *pType, ColorRGBA Color, bool UseGradient, ColorRGBA Color2)
+void CWarList::UpsertWarType(int Index, const char *pType, ColorRGBA Color)
 {
 	if(str_comp(pType, "none") == 0)
 		return;
@@ -231,12 +227,10 @@ void CWarList::UpsertWarType(int Index, const char *pType, ColorRGBA Color, bool
 	{
 		str_copy(m_WarTypes[Index]->m_aWarName, pType);
 		m_WarTypes[Index]->m_Color = Color;
-		m_WarTypes[Index]->m_UseGradient = UseGradient;
-		m_WarTypes[Index]->m_Color2 = Color2;
 	}
 	else
 	{
-		AddWarType(pType, Color, UseGradient, Color2);
+		AddWarType(pType, Color);
 	}
 }
 
@@ -283,7 +277,7 @@ void CWarList::RemoveWarEntryDuplicates(const char *pName, const char *pClan)
 	}
 }
 
-void CWarList::AddWarType(const char *pType, ColorRGBA Color, bool UseGradient, ColorRGBA Color2)
+void CWarList::AddWarType(const char *pType, ColorRGBA Color)
 {
 	if(str_comp(pType, "none") == 0)
 		return;
@@ -291,14 +285,12 @@ void CWarList::AddWarType(const char *pType, ColorRGBA Color, bool UseGradient, 
 	CWarType *Type = FindWarType(pType);
 	if(Type == m_pWarTypeNone)
 	{
-		CWarType *NewType = new CWarType(pType, Color, true, false, UseGradient, Color2);
+		CWarType *NewType = new CWarType(pType, Color);
 		m_WarTypes.push_back(NewType);
 	}
 	else
 	{
 		Type->m_Color = Color;
-		Type->m_UseGradient = UseGradient;
-		Type->m_Color2 = Color2;
 	}
 }
 
@@ -364,60 +356,6 @@ CWarEntry *CWarList::FindWarEntry(const char *pName, const char *pClan, const ch
 		return &(*It);
 	else
 		return nullptr;
-}
-
-std::vector<STextColorSplit> CWarList::BuildGradientColorSplits(const char *pText, const ColorRGBA &Color1, const ColorRGBA &Color2)
-{
-	std::vector<STextColorSplit> vSplits;
-	size_t Size, Count;
-	str_utf8_stats(pText, str_length(pText) + 1, SIZE_MAX, &Size, &Count);
-	if(Count == 0)
-		return vSplits;
-
-	if(Count == 1)
-	{
-		vSplits.emplace_back(0, -1, Color1);
-		return vSplits;
-	}
-
-	vSplits.reserve(Count);
-	const char *pStr = pText;
-	for(size_t i = 0; i < Count; i++)
-	{
-		int ByteOffset = (int)(pStr - pText);
-		const char *pPrev = pStr;
-		str_utf8_decode(&pStr);
-		int ByteLen = (int)(pStr - pPrev);
-		float t = (float)i / (float)(Count - 1);
-		ColorRGBA Col(Color1.r + t * (Color2.r - Color1.r), Color1.g + t * (Color2.g - Color1.g), Color1.b + t * (Color2.b - Color1.b), 1.0f);
-		vSplits.emplace_back(ByteOffset, ByteLen, Col);
-	}
-	return vSplits;
-}
-
-std::vector<STextColorSplit> CWarList::BuildAnimatedGradientColorSplits(const char *pText, const ColorRGBA &Color1, const ColorRGBA &Color2, float Phase)
-{
-	std::vector<STextColorSplit> vSplits;
-	size_t Size, Count;
-	str_utf8_stats(pText, str_length(pText) + 1, SIZE_MAX, &Size, &Count);
-	if(Count == 0)
-		return vSplits;
-
-	vSplits.reserve(Count);
-	const char *pStr = pText;
-	for(size_t i = 0; i < Count; i++)
-	{
-		int ByteOffset = (int)(pStr - pText);
-		const char *pPrev = pStr;
-		str_utf8_decode(&pStr);
-		int ByteLen = (int)(pStr - pPrev);
-		float t = Count == 1 ? 0.5f : (float)i / (float)(Count - 1);
-		// Sweeps the Color2 peak from left (t == Phase) to the right as Phase grows
-		float Wave = 0.5f + 0.5f * std::cos(2.0f * pi * (t - Phase));
-		ColorRGBA Col(Color1.r + Wave * (Color2.r - Color1.r), Color1.g + Wave * (Color2.g - Color1.g), Color1.b + Wave * (Color2.b - Color1.b), 1.0f);
-		vSplits.emplace_back(ByteOffset, ByteLen, Col);
-	}
-	return vSplits;
 }
 
 ColorRGBA CWarList::GetPriorityColor(int ClientId)
@@ -488,8 +426,6 @@ void CWarList::UpdateWarPlayers()
 		memset(m_WarPlayers[i].m_aReason, 0, sizeof(m_WarPlayers[i].m_aReason));
 		m_WarPlayers[i].m_NameColor = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
 		m_WarPlayers[i].m_ClanColor = ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f);
-		m_WarPlayers[i].m_NameGradient = false;
-		m_WarPlayers[i].m_ClanGradient = false;
 		m_WarPlayers[i].m_WarGroupMatches.clear();
 		m_WarPlayers[i].m_WarGroupMatches.resize((int)m_WarTypes.size(), false);
 
@@ -500,8 +436,6 @@ void CWarList::UpdateWarPlayers()
 				str_copy(m_WarPlayers[i].m_aReason, Entry.m_aReason);
 				m_WarPlayers[i].m_WarName = true;
 				m_WarPlayers[i].m_NameColor = Entry.m_pWarType->m_Color;
-				m_WarPlayers[i].m_NameColor2 = Entry.m_pWarType->m_Color2;
-				m_WarPlayers[i].m_NameGradient = Entry.m_pWarType->m_UseGradient;
 				m_WarPlayers[i].m_WarGroupMatches[Entry.m_pWarType->m_Index] = true;
 			}
 			else if(str_comp(GameClient()->m_aClients[i].m_aClan, Entry.m_aClan) == 0 && str_comp(Entry.m_aClan, "") != 0)
@@ -512,8 +446,6 @@ void CWarList::UpdateWarPlayers()
 
 				m_WarPlayers[i].m_WarClan = true;
 				m_WarPlayers[i].m_ClanColor = Entry.m_pWarType->m_Color;
-				m_WarPlayers[i].m_ClanColor2 = Entry.m_pWarType->m_Color2;
-				m_WarPlayers[i].m_ClanGradient = Entry.m_pWarType->m_UseGradient;
 				m_WarPlayers[i].m_WarGroupMatches[Entry.m_pWarType->m_Index] = true;
 			}
 		}
@@ -554,9 +486,8 @@ void CWarList::ConfigSaveCallback(IConfigManager *pConfigManager, void *pUserDat
 		char aEscapeType[MAX_WARLIST_TYPE_LENGTH * 2];
 		EscapeParam(aEscapeType, WarType.m_aWarName, sizeof(aEscapeType));
 		ColorHSLA Color = color_cast<ColorHSLA>(WarType.m_Color);
-		ColorHSLA Color2 = color_cast<ColorHSLA>(WarType.m_Color2);
 
-		str_format(aBuf, sizeof(aBuf), "update_war_group %d \"%s\" %d %d %d", i, aEscapeType, Color.Pack(false), WarType.m_UseGradient ? 1 : 0, Color2.Pack(false));
+		str_format(aBuf, sizeof(aBuf), "update_war_group %d \"%s\" %d", i, aEscapeType, Color.Pack(false));
 		pConfigManager->WriteLine(aBuf, ConfigDomain::TCLIENTWARLIST);
 	}
 	for(CWarEntry &Entry : pThis->m_vWarEntries)

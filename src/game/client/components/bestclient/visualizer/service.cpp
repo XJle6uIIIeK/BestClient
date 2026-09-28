@@ -4,7 +4,36 @@
 #include "source.h"
 
 #include <base/math.h>
-#include <base/system.h>
+
+#include <algorithm>
+
+template<typename T>
+constexpr T minimum(T a, T b)
+{
+	return (std::min)(a, b);
+}
+
+template<typename T>
+constexpr T maximum(T a, T b)
+{
+	return (std::max)(a, b);
+}
+
+template<typename T>
+constexpr T minimum(T a, T b, T c)
+{
+	return (std::min)(a, (std::min)(b, c));
+}
+
+template<typename T>
+constexpr T maximum(T a, T b, T c)
+{
+	return (std::max)(a, (std::max)(b, c));
+}
+
+#include <base/dbg.h>
+#include <base/str.h>
+#include <base/time.h>
 
 #include <engine/shared/config.h>
 

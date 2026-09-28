@@ -2,15 +2,7 @@
 #ifndef GAME_CLIENT_COMPONENTS_BESTCLIENT_SUBSYSTEM_RUNTIME_H
 #define GAME_CLIENT_COMPONENTS_BESTCLIENT_SUBSYSTEM_RUNTIME_H
 
-#include <base/system.h>
-
-enum class ESubsystemRuntimeState
-{
-	DISABLED = 0,
-	ARMED,
-	ACTIVE,
-	COOLDOWN,
-};
+#include <base/types.h>
 
 class CSubsystemTicker
 {

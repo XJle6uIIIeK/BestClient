@@ -3,6 +3,7 @@
 
 #include "sounds.h"
 
+#include <base/mem.h>
 #include <base/time.h>
 
 #include <engine/engine.h>
@@ -164,8 +165,23 @@ void CSounds::OnRender()
 	}
 }
 
+void CSounds::ClearQueue()
+{
+	mem_zero(m_aQueue, sizeof(m_aQueue));
+	m_QueuePos = 0;
+	m_QueueWaitTime = time();
+}
+
 void CSounds::Clear()
 {
+	// Wait for any in-progress sound loading job to finish before unloading
+	if(m_WaitForSoundJob && m_pSoundJob)
+	{
+		while(m_pSoundJob->State() != IJob::STATE_DONE && m_pSoundJob->State() != IJob::STATE_ABORTED)
+			m_pSoundJob->Abort();
+		m_WaitForSoundJob = false;
+	}
+
 	Sound()->StopAll();
 	ClearQueue();
 
@@ -192,13 +208,6 @@ void CSounds::Clear()
 		CSoundLoading(GameClient(), false).Run();
 		m_WaitForSoundJob = false;
 	}
-}
-
-void CSounds::ClearQueue()
-{
-	mem_zero(m_aQueue, sizeof(m_aQueue));
-	m_QueuePos = 0;
-	m_QueueWaitTime = time();
 }
 
 void CSounds::Enqueue(int Channel, int SetId)
