@@ -25,8 +25,6 @@
 
 #include "graphics_threaded.h"
 
-#include <cstdlib>
-
 class CSemaphore;
 
 static CVideoMode g_aFakeModes[] = {
@@ -710,7 +708,7 @@ void CGraphics_Threaded::ScreenshotDirect(bool *pSwapped)
 	if(!m_DoScreenshot)
 		return;
 	m_DoScreenshot = false;
-	if(!WindowActive() && !std::getenv("BC_QA_ALLOW_INACTIVE_SCREENSHOT"))
+	if(!WindowActive())
 		return;
 
 	CImageInfo Image;
@@ -2884,13 +2882,6 @@ void CGraphics_Threaded::TakeCustomScreenshot(const char *pFilename)
 
 void CGraphics_Threaded::Swap()
 {
-	static const int64_t QAStart = time_get();
-	static bool QACaptured = false;
-	if(!QACaptured && std::getenv("BC_QA_ALLOW_INACTIVE_SCREENSHOT") && time_get() - QAStart > time_freq() * 10)
-	{
-		TakeCustomScreenshot("screenshots/through-hook-rounded-qa.png");
-		QACaptured = true;
-	}
 	bool Swapped = false;
 	ScreenshotDirect(&Swapped);
 	ReadPixelDirect(&Swapped);

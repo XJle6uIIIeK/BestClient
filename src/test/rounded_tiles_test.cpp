@@ -257,9 +257,79 @@ TEST(RoundedTiles, TrimmedStraightOutlineStopsAtTheArcTangent)
 	EXPECT_FALSE(Covers(vec2(3, 31)));
 	// A shortened edge must have a flat cap at the tangent. Treating its
 	// endpoint as a distance-field point adds the triangular purple spur.
-	EXPECT_FALSE(Covers(vec2(15, 31)));
+	// The arc's inward band reaches into this side tile before its tangent.
+	EXPECT_TRUE(Covers(vec2(15, 31)));
+	EXPECT_FALSE(Covers(vec2(9, 31)));
 	EXPECT_TRUE(Covers(vec2(20, 31)));
 	EXPECT_TRUE(Covers(vec2(25, 31)));
+}
+
+TEST(RoundedTiles, FlatOutlineCapDoesNotLoseTheLastMeshCell)
+{
+	CEntityRegions Regions;
+	Regions.m_Width = Regions.m_Height = 3;
+	Regions.m_vTypes = {
+		CEntityRegions::SOLID, CEntityRegions::SOLID, CEntityRegions::SOLID,
+		CEntityRegions::SOLID, CEntityRegions::NONE, CEntityRegions::NONE,
+		CEntityRegions::NONE, CEntityRegions::NONE, CEntityRegions::NONE};
+	const float Radius = 12.3f;
+	auto Shape = RoundedTiles::Build(Regions.Mask(1, 0, CEntityRegions::SOLID), Radius, 2, 8,
+		Regions.BlockerMask(1, 0, CEntityRegions::SOLID), Regions.TransitionCorners(1, 0));
+	// Isolate the straight cap; the neighboring arc also covers this area.
+	std::erase_if(Shape.m_vContour, [](const auto &S) { return S.m_A.y != 32 || S.m_B.y != 32; });
+	const auto Outline = RoundedTiles::Outline(Shape, 2);
+	const auto Covers = [&](vec2 P) {
+		return std::any_of(Outline.begin(), Outline.end(), [&](const auto &T) {
+			return Cross(T[1] - T[0], T[2] - T[0]) > 1e-7f && InsideTriangle(P, T[0], T[1], T[2]);
+		});
+	};
+	EXPECT_FALSE(Covers(vec2(Radius - 0.1f, 31)));
+	EXPECT_TRUE(Covers(vec2(Radius + 0.1f, 31)));
+}
+
+TEST(RoundedTiles, InnerArcOutlineContinuesInsideBothSideTiles)
+{
+	CEntityRegions Regions;
+	Regions.m_Width = Regions.m_Height = 3;
+	Regions.m_vTypes = {
+		CEntityRegions::SOLID, CEntityRegions::SOLID, CEntityRegions::SOLID,
+		CEntityRegions::SOLID, CEntityRegions::NONE, CEntityRegions::NONE,
+		CEntityRegions::SOLID, CEntityRegions::NONE, CEntityRegions::NONE};
+	for(const float Radius : {4.0f, 12.3f, 16.0f})
+		for(const int Mode : {1, 2})
+			for(const int Steps : {2, 4, 8, 16})
+				for(const ivec2 Tile : {ivec2(1, 0), ivec2(0, 1)})
+				{
+					const auto Shape = RoundedTiles::Build(Regions.Mask(Tile.x, Tile.y, CEntityRegions::SOLID), Radius, Mode, Steps,
+						Regions.BlockerMask(Tile.x, Tile.y, CEntityRegions::SOLID), Regions.TransitionCorners(Tile.x, Tile.y));
+					const auto Outline = RoundedTiles::Outline(Shape, 2);
+					const vec2 P = Tile.x ? vec2(Radius - 0.25f, 31) : vec2(31, Radius - 0.25f);
+					EXPECT_TRUE(std::any_of(Outline.begin(), Outline.end(), [&](const auto &T) {
+						return Cross(T[1] - T[0], T[2] - T[0]) > 1e-7f && InsideTriangle(P, T[0], T[1], T[2]);
+					})) << "radius=" << Radius << " mode=" << Mode << " steps=" << Steps << " tile=" << Tile.x << ',' << Tile.y;
+				}
+}
+
+TEST(RoundedTiles, ThroughArtworkContinuesIntoTheDiagonalWedge)
+{
+	const auto Shape = RoundedTiles::Build((1u << 3) | (1u << 6), 16, 2, 8, 0, 1u << 3);
+	int Wedges = 0;
+	for(const auto &Q : Shape.m_vQuads)
+	{
+		if(length(Q.m_RepeatOffset) < 0.5f)
+			continue;
+		++Wedges;
+		for(int K = 0; K < 4; ++K)
+		{
+			const vec2 UV = RoundedTiles::SampleUv(Q, K, true);
+			EXPECT_GE(UV.x, -0.0001f);
+			EXPECT_LE(UV.x, 1.0001f);
+			EXPECT_GE(UV.y, -0.0001f);
+			EXPECT_LE(UV.y, 1.0001f);
+			EXPECT_LT(length(UV + Q.m_RepeatOffset - Q.m_Pos[K] / 32.0f), 0.0001f);
+		}
+	}
+	EXPECT_GT(Wedges, 0);
 }
 
 TEST(RoundedTiles, TwoMaterialsPartitionCoveredCornerWithoutGaps)

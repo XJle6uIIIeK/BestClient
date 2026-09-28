@@ -611,15 +611,6 @@ const RoundedTiles::CShape *CRenderLayerTile::RoundedShape(int X, int Y, int Ind
 {
 	if(!m_pEntityRegions || m_RoundingPercent <= 0 || !Index)
 		return nullptr;
-	if(X == 27 && Y == 9 && m_RoundingLayer == 1)
-	{
-		static bool Logged = false;
-		if(!Logged)
-		{
-			Logged = true;
-			dbg_msg("round-qa", "front index=%d top=%d type=%d should=%d mask=%u", Index, m_pEntityRegions->TopLayer(X, Y), m_pEntityRegions->Get(X, Y), m_pEntityRegions->ShouldRoundTile(X, Y, m_RoundingLayer, Index), m_pEntityRegions->Mask(X, Y, m_pEntityRegions->Get(X, Y)));
-		}
-	}
 	// A front-layer through tile and the game tile beneath it share a mesh.
 	if(!m_pEntityRegions->ShouldRoundTile(X, Y, m_RoundingLayer, Index))
 		return nullptr;
@@ -703,11 +694,7 @@ void CRenderLayerTile::RenderRoundedTiles(const ColorRGBA &Color, const CRenderL
 				{
 					// Array/volume samplers clamp extrapolated corner UVs per fragment.
 					// The atlas fallback cannot do that without sampling adjacent tiles.
-					// Inner arcs add area outside the original cell. Sampling by
-					// position clamps a through tile's diagonal stripes to a single
-					// edge texel there. Stretch its complete source patch over that
-					// added area instead, as for an outer rounded corner.
-					const vec2 SourceUv = ThroughArtwork ? Q.m_Uv[K] : Q.m_SampleUv[K];
+					const vec2 SourceUv = RoundedTiles::SampleUv(Q, K, ThroughArtwork);
 					const vec2 SampleUv = Arrays ? SourceUv : vec2(std::clamp(SourceUv.x, 0.0f, 1.0f), std::clamp(SourceUv.y, 0.0f, 1.0f));
 					UV[K] = RoundedTiles::Bilinear({vec2(T.m_aTexX[0], T.m_aTexY[0]), vec2(T.m_aTexX[1], T.m_aTexY[1]), vec2(T.m_aTexX[2], T.m_aTexY[2]), vec2(T.m_aTexX[3], T.m_aTexY[3])}, SampleUv.x, SampleUv.y);
 					if(!Arrays)
@@ -889,7 +876,7 @@ void CRenderLayerTile::UploadTileData(std::optional<CTileLayerVisuals> &VisualsO
 						vec4 U[4];
 						for(int K = 0; K < 4; ++K)
 						{
-							const vec2 SourceUv = ThroughArtwork ? Q.m_Uv[K] : Q.m_SampleUv[K];
+							const vec2 SourceUv = RoundedTiles::SampleUv(Q, K, ThroughArtwork);
 							U[K] = mix(mix(T[0], T[1], SourceUv.x), mix(T[3], T[2], SourceUv.x), SourceUv.y);
 						}
 						vTmpTileTexCoords.push_back({U[0], U[1], U[2], U[3]});

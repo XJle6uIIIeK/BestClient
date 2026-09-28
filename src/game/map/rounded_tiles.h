@@ -16,7 +16,16 @@ namespace RoundedTiles
 		std::array<vec2, 4> m_Pos; // clockwise: TL, TR, BR, BL
 		std::array<vec2, 4> m_Uv; // original cell parameter, including shared edges
 		std::array<vec2, 4> m_SampleUv; // texture sampling can hold artwork in place
+		vec2 m_RepeatOffset = vec2(0, 0); // diagonal cell filled by an inner wedge
 	};
+
+	inline vec2 SampleUv(const CQuad &Quad, int Vertex, bool RepeatingArtwork)
+	{
+		// A complementary wedge lies wholly in the diagonal cell. A repeating
+		// through-hook pattern uses that cell's local UVs instead of clamping
+		// the source tile's edge across the newly filled area.
+		return Quad.m_SampleUv[Vertex] - (RepeatingArtwork ? Quad.m_RepeatOffset : vec2(0, 0));
+	}
 
 	struct CSegment
 	{
@@ -132,7 +141,8 @@ namespace RoundedTiles
 		const auto MakeCorner = [&](int I, int X, int Y) {
 			// A covered material corner must round even if its neighbor would
 			// normally block it. An empty corner still follows the selected mode.
-			const bool Covered = (ComplementCorners & (1u << I)) && Occupied(BlockerMask, X, Y);
+			const bool Covered = ((ComplementCorners & (1u << I)) && Occupied(BlockerMask, X, Y)) ||
+				((TrimCorners & (1u << I)) && (Occupied(BlockerMask, X, 0) || Occupied(BlockerMask, 0, Y)));
 			return Corner(Mask, X, Y, Radius, Covered ? 2 : Mode, Covered ? 0 : BlockerMask);
 		};
 		std::array<CCorner, 4> Corners = {
@@ -153,11 +163,9 @@ namespace RoundedTiles
 				{
 					Corners[I].m_TrimX = MissingY;
 					Corners[I].m_TrimY = MissingX;
-					// Only the diagonal tile draws the inward arc. If a side
-					// tile also bends into the empty cell, its mesh and outline
-					// overlap the arc and leave visible square stubs.
-					if(Corners[I].m_Inner)
-						Corners[I].m_Active = false;
+					// Keep the arc as a distance source: its inward band reaches
+					// into this side tile before the straight-edge tangent. Only
+					// the diagonal tile adds geometry into the empty cell.
 				}
 			}
 		}
@@ -167,7 +175,7 @@ namespace RoundedTiles
 		// the two materials.
 		auto MeshCorners = Corners;
 		for(auto &C : MeshCorners)
-			if(C.m_Complement && C.m_Inner)
+			if((C.m_Complement || C.m_TrimX || C.m_TrimY) && C.m_Inner)
 				C.m_Active = false;
 		bool Active = false;
 		for(const auto &C : MeshCorners)
@@ -220,6 +228,7 @@ namespace RoundedTiles
 					std::swap(P, Q);
 				CQuad Wedge;
 				Wedge.m_Pos = {C.m_Origin, P, Q, Q};
+				Wedge.m_RepeatOffset = Sign;
 				for(int K = 0; K < 4; ++K)
 					Wedge.m_Uv[K] = Wedge.m_SampleUv[K] = Wedge.m_Pos[K] / 32.0f;
 				Shape.m_vQuads.push_back(Wedge);
@@ -251,7 +260,8 @@ namespace RoundedTiles
 			{
 				const float A = (pi * 0.5f) * I / (2 * Steps);
 				vec2 Next = C.m_Center - vec2(Sign.x * std::cos(A), Sign.y * std::sin(A)) * Radius;
-				Shape.m_vContour.push_back({Previous, Next, C.m_Complement ? CornerIndex : -1});
+				Shape.m_vContour.push_back({Previous, Next,
+					(C.m_Complement || C.m_TrimX || C.m_TrimY) ? CornerIndex : -1});
 				Previous = Next;
 			}
 		}
@@ -304,22 +314,31 @@ namespace RoundedTiles
 		});
 	}
 
-	inline float Distance(const CShape &Shape, vec2 P)
+	inline float BandDistance(const CShape &Shape, vec2 P, float Width)
 	{
 		float Result = 1e10f;
 		for(const auto &S : Shape.m_vContour)
 		{
 			const vec2 D = S.m_B - S.m_A;
-			const float Projection = dot(P - S.m_A, D) / std::max(dot(D, D), 1e-12f);
-			// A shortened straight side ends at a neighboring arc tangent. A
-			// round endpoint cap would spill past it as a triangular outline stub.
-			if((Projection < 0 && S.m_ButtA) || (Projection > 1 && S.m_ButtB))
-				continue;
+			const float LengthSquared = std::max(dot(D, D), 1e-12f);
+			const float Projection = dot(P - S.m_A, D) / LengthSquared;
 			const float T = std::clamp(Projection, 0.0f, 1.0f);
-			Result = std::min(Result, length(P - (S.m_A + D * T)));
+			float Band = length(P - (S.m_A + D * T)) - Width;
+			// Flat caps need a continuous signed half-plane, not an infinite
+			// distance beyond the endpoint. Interpolating an infinite value while
+			// clipping a mesh cell cuts off the last part of the straight outline.
+			if(S.m_ButtA || S.m_ButtB)
+			{
+				const float SegmentLength = std::sqrt(LengthSquared);
+				if(S.m_ButtA)
+					Band = std::max(Band, -Projection * SegmentLength);
+				if(S.m_ButtB)
+					Band = std::max(Band, (Projection - 1.0f) * SegmentLength);
+			}
+			Result = std::min(Result, Band);
 		}
 		for(const vec2 Join : Shape.m_vOutlineJoins)
-			Result = std::min(Result, length(P - Join));
+			Result = std::min(Result, length(P - Join) - Width);
 		return Result;
 	}
 
@@ -347,7 +366,7 @@ namespace RoundedTiles
 				{
 					if(Grid[X + 1] <= Grid[X] || Grid[Y + 1] <= Grid[Y])
 						continue;
-					if(Distance(Shape, vec2((Grid[X] + Grid[X + 1]) * 0.5f, (Grid[Y] + Grid[Y + 1]) * 0.5f)) > Width)
+					if(BandDistance(Shape, vec2((Grid[X] + Grid[X + 1]) * 0.5f, (Grid[Y] + Grid[Y + 1]) * 0.5f), Width) > 0)
 						continue;
 					const vec2 A(Grid[X], Grid[Y]), B(Grid[X + 1], Grid[Y]), C(Grid[X + 1], Grid[Y + 1]), D(Grid[X], Grid[Y + 1]);
 					Result.push_back({A, B, C});
@@ -357,12 +376,12 @@ namespace RoundedTiles
 		}
 		for(const auto &Q : Shape.m_vQuads)
 		{
-			// Distance to the contour is 1-Lipschitz. Skip patches whose
+			// The signed distance band is 1-Lipschitz. Skip patches whose
 			// entire convex hull is farther than the outline width; most of the
 			// increasingly fine patches at high zoom lie in the tile interior.
 			const vec2 Center = (Q.m_Pos[0] + Q.m_Pos[1] + Q.m_Pos[2] + Q.m_Pos[3]) * 0.25f;
 			const float Reach = std::max({length(Q.m_Pos[0] - Center), length(Q.m_Pos[1] - Center), length(Q.m_Pos[2] - Center), length(Q.m_Pos[3] - Center)});
-			if(Distance(Shape, Center) > Width + Reach)
+			if(BandDistance(Shape, Center, Width) > Reach)
 				continue;
 			const float Size = std::max({length(Q.m_Pos[1] - Q.m_Pos[0]), length(Q.m_Pos[3] - Q.m_Pos[0]), length(Q.m_Pos[2] - Q.m_Pos[1]), length(Q.m_Pos[2] - Q.m_Pos[3])});
 			const int N = std::max(2, (int)std::ceil(Size / 2.0f));
@@ -380,7 +399,7 @@ namespace RoundedTiles
 						for(int K = 0; K < 3; ++K)
 						{
 							const vec2 A = Tri[K], B = Tri[(K + 1) % 3];
-							const float DA = Width - Distance(Shape, A), DB = Width - Distance(Shape, B);
+							const float DA = -BandDistance(Shape, A, Width), DB = -BandDistance(Shape, B, Width);
 							if(DA >= 0)
 								Polygon[Count++] = A;
 							if((DA >= 0) != (DB >= 0))
