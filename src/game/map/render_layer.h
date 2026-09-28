@@ -11,11 +11,11 @@ using offset_ptr32 = unsigned int;
 
 #include <engine/graphics.h>
 
-#include <game/map/envelope_manager.h>
 #include <game/map/entity_regions.h>
-#include <game/map/rounded_tiles.h>
+#include <game/map/envelope_manager.h>
 #include <game/map/render_component.h>
 #include <game/map/render_map.h>
+#include <game/map/rounded_tiles.h>
 #include <game/mapitems.h>
 #include <game/mapitems_ex.h>
 
@@ -136,7 +136,9 @@ public:
 		m_RoundingTele = Tele;
 		m_RoundingGame = Game;
 		m_RoundingSwitch = Switch;
-		m_RoundingLayer = Switch ? 3 : Tele ? 2 : Game ? 0 : 1;
+		m_RoundingLayer = Switch ? 3 : Tele ? 2 :
+				       Game         ? 0 :
+						      1;
 	}
 	~CRenderLayerTile() override = default;
 	void Render(const CRenderLayerParams &Params) override;

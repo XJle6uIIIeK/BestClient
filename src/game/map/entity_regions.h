@@ -150,7 +150,7 @@ public:
 			const bool Inner = H == Here && V == Here && D != Here && Get(X + SX[Corner], Y + SY[Corner]) != Type;
 			const bool Outer = H == V && V == D && H != Here && Get(X + SX[Corner], Y) != NONE && Get(X + SX[Corner], Y) != Type;
 			const bool Trim = D == Here && ((H == Here && V != Here && Get(X, Y + SY[Corner]) != Type) ||
-				(V == Here && H != Here && Get(X + SX[Corner], Y) != Type));
+							       (V == Here && H != Here && Get(X + SX[Corner], Y) != Type));
 			if(Inner || Outer)
 				Result |= 1u << Corner;
 			if(Trim)
@@ -267,7 +267,9 @@ public:
 				const size_t I = (size_t)Y * m_Width + X;
 				m_vTypes[I] = VisibleType(Game, Front, Tele, Switch);
 				m_vRegionKeys[I] = VisibleRegionKey(Game, Front, Tele, Switch);
-				m_vTopLayers[I] = Switch ? 3 : Tele ? 2 : Category(Front) != NONE ? 1 : 0;
+				m_vTopLayers[I] = Switch ? 3 : Tele            ? 2 :
+						       Category(Front) != NONE ? 1 :
+										 0;
 			}
 	}
 };

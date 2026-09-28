@@ -23,7 +23,6 @@
 
 #include <game/localization.h>
 
-
 #if defined(CONF_VIDEORECORDER)
 #include <engine/shared/video.h>
 #endif
@@ -1044,7 +1043,7 @@ void CGraphics_Threaded::QuadsTex3DDrawFreeform(const CFreeformItem *pArray, int
 			V.m_Tex.u = m_aTexture[Source].u;
 			V.m_Tex.v = m_aTexture[Source].v;
 			V.m_Tex.w = Index;
-			SetColor(&V, Source);
+			V.m_Color = m_aColor[Source];
 		}
 		AddVertices(Count, m_aVerticesTex3D);
 	}

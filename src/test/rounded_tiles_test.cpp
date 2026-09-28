@@ -1,3 +1,4 @@
+#include <game/map/entity_outline.h>
 #include <game/map/entity_regions.h>
 #include <game/map/rounded_tiles.h>
 
@@ -159,7 +160,8 @@ TEST(EntityRegions, SwitchTileBlocksUnfreezeCorner)
 	EXPECT_EQ(Regions.BlockerMask(1, 1, CEntityRegions::UNFREEZE), East);
 	EXPECT_EQ(Regions.PriorityMask(1, 1, CEntityRegions::UNFREEZE), East);
 	EXPECT_FALSE(RoundedTiles::Corner(Regions.Mask(1, 1, CEntityRegions::UNFREEZE), 1, -1, 16, 2,
-		Regions.BlockerMask(1, 1, CEntityRegions::UNFREEZE)).m_Active);
+		Regions.BlockerMask(1, 1, CEntityRegions::UNFREEZE))
+			.m_Active);
 }
 
 TEST(EntityRegions, CoveredMaterialJunctionUsesMatchingInnerAndOuterCorners)
@@ -219,7 +221,7 @@ TEST(RoundedTiles, EmptyInnerJunctionHasOneSurface)
 	std::vector<std::pair<ivec2, RoundedTiles::CShape>> Shapes;
 	for(const ivec2 Tile : {ivec2(0, 0), ivec2(1, 0), ivec2(0, 1)})
 		Shapes.emplace_back(Tile, RoundedTiles::Build(Regions.Mask(Tile.x, Tile.y, CEntityRegions::SOLID), 16, 2, 16,
-			Regions.BlockerMask(Tile.x, Tile.y, CEntityRegions::SOLID), Regions.TransitionCorners(Tile.x, Tile.y)));
+						  Regions.BlockerMask(Tile.x, Tile.y, CEntityRegions::SOLID), Regions.TransitionCorners(Tile.x, Tile.y)));
 	int Overlaps = 0;
 	for(int Y = 0; Y < 128; ++Y)
 		for(int X = 0; X < 128; ++X)
@@ -306,7 +308,8 @@ TEST(RoundedTiles, InnerArcOutlineContinuesInsideBothSideTiles)
 					const vec2 P = Tile.x ? vec2(Radius - 0.25f, 31) : vec2(31, Radius - 0.25f);
 					EXPECT_TRUE(std::any_of(Outline.begin(), Outline.end(), [&](const auto &T) {
 						return Cross(T[1] - T[0], T[2] - T[0]) > 1e-7f && InsideTriangle(P, T[0], T[1], T[2]);
-					})) << "radius=" << Radius << " mode=" << Mode << " steps=" << Steps << " tile=" << Tile.x << ',' << Tile.y;
+					})) << "radius="
+					    << Radius << " mode=" << Mode << " steps=" << Steps << " tile=" << Tile.x << ',' << Tile.y;
 				}
 }
 
@@ -347,7 +350,7 @@ TEST(RoundedTiles, TwoMaterialsPartitionCoveredCornerWithoutGaps)
 				{
 					const int Type = Regions.Get(X, Y);
 					Shapes.emplace_back(ivec2(X, Y), RoundedTiles::Build(Regions.Mask(X, Y, Type), Radius, Mode, 16,
-						Regions.BlockerMask(X, Y, Type), Regions.TransitionCorners(X, Y)));
+										 Regions.BlockerMask(X, Y, Type), Regions.TransitionCorners(X, Y)));
 				}
 			int Mismatches = 0;
 			std::vector<ivec2> FirstMismatches;
@@ -375,7 +378,7 @@ TEST(RoundedTiles, TwoMaterialsPartitionCoveredCornerWithoutGaps)
 TEST(RoundedTiles, SharedMaterialArcHasExactlyOneOutlineOwner)
 {
 	for(const auto Pair : {std::pair{CEntityRegions::FREEZE, CEntityRegions::SOLID},
-			std::pair{CEntityRegions::SOLID, CEntityRegions::FREEZE}})
+		    std::pair{CEntityRegions::SOLID, CEntityRegions::FREEZE}})
 	{
 		CEntityRegions Regions;
 		Regions.m_Width = Regions.m_Height = 3;
@@ -487,7 +490,8 @@ TEST(RoundedTiles, StairOutlineHasOneFourConnectedRasterComponent)
 		std::array<bool, 16 * 16> Pixels{};
 		for(const ivec2 Tile : Tiles)
 		{
-			const unsigned Blocker = Tile == ivec2(1, 0) ? 1u << 3 : Tile == ivec2(0, 1) ? 1u << 1 : 1u << 0;
+			const unsigned Blocker = Tile == ivec2(1, 0) ? 1u << 3 : Tile == ivec2(0, 1) ? 1u << 1 :
+												       1u << 0;
 			auto Shape = RoundedTiles::Build(Mask(Tiles, Tile), 16, 2, 4, Blocker);
 			if(!AddJoin)
 				Shape.m_vOutlineJoins.clear();
@@ -724,4 +728,108 @@ TEST(RoundedTiles, DetailMeetsPixelError)
 		int N = RoundedTiles::Detail(16, Pixels);
 		EXPECT_LE(16 * Pixels * (1 - std::cos(pi / (8 * N))), 0.2501f);
 	}
+}
+
+TEST(EntityOutlineIndex, EmptyMapAndEmptyView)
+{
+	CEntityOutlineIndex Index;
+	CEntityRegions Regions;
+	Index.Build(Regions);
+	int Count = 0;
+	auto Draw = [&](const auto &, vec2, vec2) { ++Count; };
+	Index.Visit(-100000, -100000, 100000, 100000, Draw);
+	EXPECT_EQ(Count, 0);
+	Regions.m_Width = Regions.m_Height = 3;
+	Regions.m_vTypes.assign(9, CEntityRegions::NONE);
+	Regions.m_vTypes[4] = CEntityRegions::SOLID;
+	Index.Build(Regions);
+	Index.Visit(1, 1, 1, 2, Draw);
+	Index.Visit(1, 2, 2, 1, Draw);
+	EXPECT_EQ(Count, 0);
+	Index.Visit(1, 1, 2, 2, Draw);
+	EXPECT_EQ(Count, 1);
+}
+
+TEST(EntityOutlineIndex, NeighborhoodMatchesRegionQueries)
+{
+	for(unsigned Mask = 0; Mask < 256; ++Mask)
+	{
+		CEntityRegions Regions;
+		Regions.m_Width = Regions.m_Height = 3;
+		Regions.m_vTypes.assign(9, CEntityRegions::FREEZE);
+		Regions.m_vTypes[4] = CEntityRegions::SOLID;
+		for(int Y = -1; Y <= 1; ++Y)
+			for(int X = -1; X <= 1; ++X)
+				if(RoundedTiles::Occupied(Mask, X, Y))
+					Regions.m_vTypes[(Y + 1) * 3 + X + 1] = CEntityRegions::SOLID;
+		CEntityOutlineIndex Index;
+		Index.Build(Regions);
+		int Count = 0;
+		Index.Visit(1, 1, 2, 2, [&](const auto &Cell, vec2 Position, vec2 Scale) {
+			++Count;
+			EXPECT_EQ(Cell.m_Type, CEntityRegions::SOLID);
+			EXPECT_EQ(Cell.m_Mask, Regions.Mask(1, 1, Cell.m_Type));
+			EXPECT_EQ(Cell.m_Blockers, Regions.BlockerMask(1, 1, Cell.m_Type));
+			EXPECT_EQ(Cell.m_Transition, Regions.TransitionCorners(1, 1));
+			EXPECT_EQ(Cell.m_HigherMask, Regions.PriorityMask(1, 1, Cell.m_Type) & ~Cell.m_Mask);
+			EXPECT_EQ(Position, vec2(32, 32));
+			EXPECT_EQ(Scale, vec2(1, 1));
+		});
+		EXPECT_EQ(Count, Mask == 255 ? 0 : 1);
+	}
+}
+
+TEST(EntityOutlineIndex, HugeZoomDoesNotRepeatClampedBorderCells)
+{
+	CEntityRegions Regions;
+	Regions.m_Width = Regions.m_Height = 3;
+	Regions.m_vTypes = {CEntityRegions::SOLID, CEntityRegions::SOLID, CEntityRegions::SOLID,
+		CEntityRegions::NONE, CEntityRegions::NONE, CEntityRegions::NONE,
+		CEntityRegions::SOLID, CEntityRegions::SOLID, CEntityRegions::SOLID};
+	CEntityOutlineIndex Index;
+	Index.Build(Regions);
+	int Count = 0, BorderCount = 0;
+	Index.Visit(-100000, -100000, 100000, 100000, [&](const auto &Cell, vec2 Position, vec2 Scale) {
+		++Count;
+		if(Cell.m_Position.x < 0 || Cell.m_Position.x >= 3)
+		{
+			++BorderCount;
+			EXPECT_GT(Scale.x, 99990);
+			EXPECT_EQ(Scale.y, 1);
+			const auto Shape = RoundedTiles::Build(Cell.m_Mask, 16, 2, 4, Cell.m_Blockers, Cell.m_Transition);
+			ASSERT_EQ(Shape.m_vQuads.size(), 1u);
+			for(const auto &Segment : Shape.m_vContour)
+				EXPECT_EQ(Segment.m_A.y, Segment.m_B.y);
+			EXPECT_EQ(Position.y, Cell.m_Position.y * 32.0f);
+		}
+	});
+	EXPECT_EQ(Count, 10);
+	EXPECT_EQ(BorderCount, 4);
+}
+
+TEST(EntityOutlineIndex, BorderRunCoverageMatchesScalarRendering)
+{
+	CEntityRegions Regions;
+	Regions.m_Width = Regions.m_Height = 3;
+	Regions.m_vTypes = {CEntityRegions::SOLID, CEntityRegions::SOLID, CEntityRegions::SOLID,
+		CEntityRegions::NONE, CEntityRegions::NONE, CEntityRegions::NONE,
+		CEntityRegions::SOLID, CEntityRegions::SOLID, CEntityRegions::SOLID};
+	CEntityOutlineIndex Index;
+	Index.Build(Regions);
+	int Count = 0;
+	Index.Visit(-20, 0, -10, 3, [&](const auto &Cell, vec2 Position, vec2 Scale) {
+		++Count;
+		EXPECT_EQ(Position.x, -640);
+		EXPECT_EQ(Scale, vec2(10, 1));
+		const auto Shape = RoundedTiles::Build(Cell.m_Mask, 16, 2, 4, Cell.m_Blockers, Cell.m_Transition);
+		for(int X = -20; X < -10; ++X)
+			for(float Y : {0.5f, 2.5f, 16.0f, 29.5f, 31.5f})
+			{
+				const vec2 Point = vec2(X * 32.0f + 16, Cell.m_Position.y * 32.0f + Y);
+				const vec2 Local = (Point - Position) / Scale;
+				EXPECT_EQ(RoundedTiles::BandDistance(Shape, Local, 2) <= 0,
+					RoundedTiles::BandDistance(Shape, vec2(16, Y), 2) <= 0);
+			}
+	});
+	EXPECT_EQ(Count, 2);
 }

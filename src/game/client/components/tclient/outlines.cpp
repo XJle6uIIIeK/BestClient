@@ -37,6 +37,7 @@ void COutlines::OnMapLoad()
 {
 	ClearRoundedCache();
 	m_Regions.Load(Layers());
+	m_OutlineIndex.Build(m_Regions);
 	m_MapDataSize = ivec2(m_Regions.m_Width, m_Regions.m_Height);
 	m_pMapData = m_Regions.m_vTypes.empty() ? nullptr : m_Regions.m_vTypes.data();
 }
@@ -109,8 +110,12 @@ void COutlines::OnRender()
 	Graphics()->TextureClear();
 	Graphics()->BlendNormal();
 	Graphics()->QuadsSetRotation(0);
-	if(!Rounded)
-		Graphics()->QuadsBegin();
+	if(Rounded)
+	{
+		RenderRoundedOutlines(StartX, StartY, EndX, EndY);
+		return;
+	}
+	Graphics()->QuadsBegin();
 
 	for(int y = StartY; y < EndY; y++)
 	{
@@ -143,39 +148,6 @@ void COutlines::OnRender()
 			}();
 			if(!Config.m_Enable || Config.m_Width <= 0)
 				continue;
-			if(Rounded)
-			{
-				// Build the exact same shape as the visible tiles. The old priority
-				// only selects the color of an edge shared by two categories.
-				const unsigned Mask = m_Regions.Mask(x, y, Type);
-				const unsigned Blockers = m_Regions.BlockerMask(x, y, Type);
-				const unsigned Transition = m_Regions.TransitionCorners(x, y);
-				const unsigned HigherMask = m_Regions.PriorityMask(x, y, Type) & ~Mask;
-				if(Mask == 255)
-					continue;
-				const uint64_t Key = uint64_t(Mask) | (uint64_t(Blockers) << 8) | (uint64_t(HigherMask) << 16) | (uint64_t(Config.m_Width) << 24) | (uint64_t(Transition) << 40);
-				auto It = m_RoundedContainers.find(Key);
-				if(It == m_RoundedContainers.end())
-				{
-					auto Shape = RoundedTiles::Build(Mask, m_RoundingPercent * 0.16f, m_RoundingMode, m_RoundingSteps, Blockers, Transition);
-					RoundedTiles::RemoveLowerPriorityEdges(Shape, HigherMask);
-					const auto Triangles = RoundedTiles::Outline(Shape, Config.m_Width);
-					std::vector<IGraphics::CFreeformItem> vItems;
-					vItems.reserve(Triangles.size());
-					for(const auto &T : Triangles)
-						vItems.emplace_back(T[0], T[1], T[2], T[2]);
-					Graphics()->SetColor(1, 1, 1, 1);
-					const int Container = Graphics()->CreateQuadContainer(false);
-					if(!vItems.empty())
-						Graphics()->QuadContainerAddQuads(Container, vItems.data(), vItems.size());
-					Graphics()->QuadContainerUpload(Container);
-					It = m_RoundedContainers.emplace(Key, std::make_pair(Container, (int)vItems.size())).first;
-				}
-				Graphics()->SetColor(color_cast<ColorRGBA>(ColorHSLA(Config.m_Color, true)));
-				for(int Offset = 0; Offset < It->second.second; Offset += 1024)
-					Graphics()->RenderQuadContainerEx(It->second.first, Offset, std::min(1024, It->second.second - Offset), x * Scale, y * Scale);
-				continue;
-			}
 			// Find neighbours
 			const bool aNeighbors[8] = {
 				GetTile(x - 1, y - 1) >= Type,
@@ -236,6 +208,68 @@ void COutlines::OnRender()
 		}
 	}
 
-	if(!Rounded)
-		Graphics()->QuadsEnd();
+	Graphics()->QuadsEnd();
+}
+
+void COutlines::RenderRoundedOutlines(int StartX, int StartY, int EndX, int EndY)
+{
+	m_OutlineIndex.Visit(StartX, StartY, EndX, EndY, [&](const CEntityOutlineIndex::CCell &Cell, vec2 Position, vec2 Scale) {
+		int Enable = 0, Width = 0;
+		unsigned Color = 0;
+		if(Cell.m_Type == OUTLINE_SOLID)
+		{
+			Enable = g_Config.m_TcOutlineSolid;
+			Width = g_Config.m_TcOutlineWidthSolid;
+			Color = g_Config.m_TcOutlineColorSolid;
+		}
+		else if(Cell.m_Type == OUTLINE_FREEZE)
+		{
+			Enable = g_Config.m_TcOutlineFreeze;
+			Width = g_Config.m_TcOutlineWidthFreeze;
+			Color = g_Config.m_TcOutlineColorFreeze;
+		}
+		else if(Cell.m_Type == OUTLINE_UNFREEZE)
+		{
+			Enable = g_Config.m_TcOutlineUnfreeze;
+			Width = g_Config.m_TcOutlineWidthUnfreeze;
+			Color = g_Config.m_TcOutlineColorUnfreeze;
+		}
+		else if(Cell.m_Type == OUTLINE_KILL)
+		{
+			Enable = g_Config.m_TcOutlineKill;
+			Width = g_Config.m_TcOutlineWidthKill;
+			Color = g_Config.m_TcOutlineColorKill;
+		}
+		else if(Cell.m_Type == OUTLINE_TELE)
+		{
+			Enable = g_Config.m_TcOutlineTele;
+			Width = g_Config.m_TcOutlineWidthTele;
+			Color = g_Config.m_TcOutlineColorTele;
+		}
+		if(!Enable || Width <= 0)
+			return;
+		const uint64_t Key = Cell.Key() | (uint64_t(Width) << 24);
+		auto It = m_RoundedContainers.find(Key);
+		if(It == m_RoundedContainers.end())
+		{
+			auto Shape = RoundedTiles::Build(Cell.m_Mask, m_RoundingPercent * 0.16f, m_RoundingMode, m_RoundingSteps, Cell.m_Blockers, Cell.m_Transition);
+			RoundedTiles::RemoveLowerPriorityEdges(Shape, Cell.m_HigherMask);
+			const auto Triangles = RoundedTiles::Outline(Shape, Width);
+			std::vector<IGraphics::CFreeformItem> vItems;
+			vItems.reserve(Triangles.size());
+			for(const auto &T : Triangles)
+				vItems.emplace_back(T[0], T[1], T[2], T[2]);
+			Graphics()->SetColor(1, 1, 1, 1);
+			const int Container = Graphics()->CreateQuadContainer(false);
+			if(!vItems.empty())
+				Graphics()->QuadContainerAddQuads(Container, vItems.data(), vItems.size());
+			Graphics()->QuadContainerUpload(Container);
+			It = m_RoundedContainers.emplace(Key, std::make_pair(Container, (int)vItems.size())).first;
+		}
+		Graphics()->SetColor(color_cast<ColorRGBA>(ColorHSLA(Color, true)));
+		for(int Offset = 0; Offset < It->second.second; Offset += 1024)
+		{
+			Graphics()->RenderQuadContainerEx(It->second.first, Offset, std::min(1024, It->second.second - Offset), Position.x, Position.y, Scale.x, Scale.y);
+		}
+	});
 }

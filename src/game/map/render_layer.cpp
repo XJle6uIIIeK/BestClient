@@ -612,13 +612,13 @@ void CRenderLayerTile::UpdateRounding()
 		if(m_VisualTiles)
 			m_VisualTiles->Unload();
 		// Runtime updates must not draw the loading menu or change its projection.
-		auto LoadingCallback = std::move(m_RenderUploadCallback);
-		m_RenderUploadCallback.reset();
+		auto LoadingCallback = std::move(m_InitCallback);
+		m_InitCallback.reset();
 		m_BuildingRoundingBuffer = true;
 		UploadTileData(m_VisualTiles, 0, false, m_RoundingGame);
 		ReuploadRoundedOverlays();
 		m_BuildingRoundingBuffer = false;
-		m_RenderUploadCallback = std::move(LoadingCallback);
+		m_InitCallback = std::move(LoadingCallback);
 		Graphics()->MapScreen(ScreenRect);
 	}
 }
@@ -669,11 +669,10 @@ void CRenderLayerTile::RenderRoundedTiles(const ColorRGBA &Color, const CRenderL
 	const float Pixels = 32.0f * Graphics()->ScreenWidth() / std::max(1.0f, X1 - X0);
 	const float Inset = std::clamp(1.25f / std::max(1.0f, Pixels), 0.0f, 0.49f);
 	const RoundedTiles::CShape Square = RoundedTiles::Build(255, 0, 0, 2);
-	if(Params.m_FpsFogEnabled && Params.m_FpsFogCullMapTiles)
+	if(Params.m_FpsFogEnabled && Params.m_FpsFogCullMapTiles && Params.m_FpsFogHalfW > 0.0f && Params.m_FpsFogHalfH > 0.0f)
 	{
 		const vec2 Center((X0 + X1) * 0.5f, (Y0 + Y1) * 0.5f);
-		const vec2 Half = Params.m_FpsFogMode == 0 ? vec2(Params.m_FpsFogRadiusTiles * 32.0f, Params.m_FpsFogRadiusTiles * 32.0f) :
-			vec2(X1 - X0, Y1 - Y0) * (std::clamp(Params.m_FpsFogZoomPercent, 1, 120) / 200.0f);
+		const vec2 Half(Params.m_FpsFogHalfW, Params.m_FpsFogHalfH);
 		if(Half.x > 0 && Half.y > 0)
 		{
 			X0 = std::max(X0, Center.x - Half.x);

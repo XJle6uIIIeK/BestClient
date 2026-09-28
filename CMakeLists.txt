@@ -3363,6 +3363,7 @@ if(CLIENT)
   )
   set_src(GAME_MAP GLOB_RECURSE src/game/map
     # tidy-alphabetical-start
+    entity_outline.h
     entity_regions.h
     envelope_extrema.cpp
     envelope_extrema.h

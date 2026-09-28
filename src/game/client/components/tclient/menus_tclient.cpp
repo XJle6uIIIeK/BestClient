@@ -1024,7 +1024,8 @@ void CMenus::RenderSettingsTClientSettings(CUIRect MainView)
 		{
 			CUIRect Tab;
 			Button.VSplitLeft(Width, &Tab, &Button);
-			if(DoButton_MenuTab(&s_aCornerModes[Mode], apNames[Mode], g_Config.m_BcEntitiesRoundingMode == Mode, &Tab, Mode == 0 ? IGraphics::CORNER_L : Mode == 2 ? IGraphics::CORNER_R : IGraphics::CORNER_NONE))
+			if(DoButton_MenuTab(&s_aCornerModes[Mode], apNames[Mode], g_Config.m_BcEntitiesRoundingMode == Mode, &Tab, Mode == 0 ? IGraphics::CORNER_L : Mode == 2 ? IGraphics::CORNER_R :
+																						 IGraphics::CORNER_NONE))
 				g_Config.m_BcEntitiesRoundingMode = Mode;
 		}
 	}

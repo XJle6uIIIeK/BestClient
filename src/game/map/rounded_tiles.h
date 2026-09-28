@@ -142,7 +142,7 @@ namespace RoundedTiles
 			// A covered material corner must round even if its neighbor would
 			// normally block it. An empty corner still follows the selected mode.
 			const bool Covered = ((ComplementCorners & (1u << I)) && Occupied(BlockerMask, X, Y)) ||
-				((TrimCorners & (1u << I)) && (Occupied(BlockerMask, X, 0) || Occupied(BlockerMask, 0, Y)));
+					     ((TrimCorners & (1u << I)) && (Occupied(BlockerMask, X, 0) || Occupied(BlockerMask, 0, Y)));
 			return Corner(Mask, X, Y, Radius, Covered ? 2 : Mode, Covered ? 0 : BlockerMask);
 		};
 		std::array<CCorner, 4> Corners = {
