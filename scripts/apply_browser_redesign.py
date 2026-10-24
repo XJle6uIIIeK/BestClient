@@ -80,6 +80,17 @@ replace_once(
 "bestclient header icon")
 
 replace_once(
+'''\t\t\tTextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_ONLY_ADVANCE_WIDTH | ETextRenderFlags::TEXT_RENDER_FLAG_NO_X_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_Y_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_PIXEL_ALIGNMENT | ETextRenderFlags::TEXT_RENDER_FLAG_NO_OVERSIZE);
+\t\t\tUi()->DoLabel(&Col.m_Rect, FontIcon::STAR, 14.0f, TEXTALIGN_MC);
+\t\t\tTextRender()->SetRenderFlags(0);''',
+'''\t\t\tTextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_ONLY_ADVANCE_WIDTH | ETextRenderFlags::TEXT_RENDER_FLAG_NO_X_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_Y_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_PIXEL_ALIGNMENT | ETextRenderFlags::TEXT_RENDER_FLAG_NO_OVERSIZE);
+\t\t\tTextRender()->TextColor(BrowserVisual::Warm);
+\t\t\tUi()->DoLabel(&Col.m_Rect, FontIcon::STAR, 14.0f, TEXTALIGN_MC);
+\t\t\tTextRender()->TextColor(TextRender()->DefaultTextColor());
+\t\t\tTextRender()->SetRenderFlags(0);''',
+"favorite header")
+
+replace_once(
 '''\t\tconst bool ShowPreview = PreviewRow && PreviewHeight > 0.5f;
 \t\tif(ShowPreview && AddressSelected)
 \t\t\ts_ListBox.SuppressNextSelectionHighlight();''',
@@ -134,6 +145,21 @@ replace_once(
 
 \t\tconst float FontSize = 12.0f;''',
 "selected row")
+
+replace_once(
+'''RenderBrowserIcons(*pUiElement->Rect(UI_ELEM_LOCK_ICON), &Button, ColorRGBA(0.75f, 0.75f, 0.75f, 1.0f), TextRender()->DefaultTextOutlineColor(), FontIcon::LOCK, TEXTALIGN_MC);''',
+'''RenderBrowserIcons(*pUiElement->Rect(UI_ELEM_LOCK_ICON), &Button, BrowserVisual::TextMuted, TextRender()->DefaultTextOutlineColor(), FontIcon::LOCK, TEXTALIGN_MC);''',
+"lock icon")
+
+replace_once(
+'''RenderBrowserIcons(*pUiElement->Rect(UI_ELEM_KEY_ICON), &Button, ColorRGBA(0.75f, 0.75f, 0.75f, 1.0f), TextRender()->DefaultTextOutlineColor(), FontIcon::KEY, TEXTALIGN_MC);''',
+'''RenderBrowserIcons(*pUiElement->Rect(UI_ELEM_KEY_ICON), &Button, BrowserVisual::TextMuted, TextRender()->DefaultTextOutlineColor(), FontIcon::KEY, TEXTALIGN_MC);''',
+"login icon")
+
+replace_once(
+'''RenderBrowserIcons(*pUiElement->Rect(UI_ELEM_FAVORITE_ICON), &Button, ColorRGBA(1.0f, 0.85f, 0.3f, 1.0f), TextRender()->DefaultTextOutlineColor(), FontIcon::STAR, TEXTALIGN_MC);''',
+'''RenderBrowserIcons(*pUiElement->Rect(UI_ELEM_FAVORITE_ICON), &Button, BrowserVisual::Warm, TextRender()->DefaultTextOutlineColor(), FontIcon::STAR, TEXTALIGN_MC);''',
+"favorite row icon")
 
 replace_once(
 '''void CMenus::RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItemActivated)
@@ -289,9 +315,13 @@ replace_once(old_buttons, new_buttons, "command controls")
 
 replace_once(
 '''\tconst ColorRGBA ColorActive = ColorRGBA(0.0f, 0.0f, 0.0f, 0.3f);
-\tconst ColorRGBA ColorInactive = ColorRGBA(0.0f, 0.0f, 0.0f, 0.15f);''',
+\tconst ColorRGBA ColorInactive = ColorRGBA(0.0f, 0.0f, 0.0f, 0.15f);
+
+\tif(!Ui()->IsPopupOpen() && Ui()->ConsumeHotkey(CUi::HOTKEY_TAB))''',
 '''\tconst ColorRGBA ColorActive = BrowserVisual::SurfaceRaised.WithAlpha(0.95f);
-\tconst ColorRGBA ColorInactive = BrowserVisual::Canvas.WithAlpha(0.62f);''',
+\tconst ColorRGBA ColorInactive = BrowserVisual::Canvas.WithAlpha(0.62f);
+
+\tif(!Ui()->IsPopupOpen() && Ui()->ConsumeHotkey(CUi::HOTKEY_TAB))''',
 "toolbox tabs")
 
 replace_once(
