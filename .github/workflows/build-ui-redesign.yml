@@ -1,15 +1,15 @@
 name: Build UI Redesign
 
 on:
-  issues:
-    types: [opened, reopened, labeled]
+  pull_request:
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: read
 
 jobs:
   windows:
-    if: startsWith(github.event.issue.title, '[build-ui-redesign]')
+    if: startsWith(github.event.pull_request.title, '[build-ui-redesign]')
     runs-on: windows-latest
     steps:
       - name: Checkout redesign branch
