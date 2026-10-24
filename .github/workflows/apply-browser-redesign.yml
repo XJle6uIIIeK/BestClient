@@ -1,0 +1,37 @@
+name: Apply Browser Redesign
+
+on:
+  push:
+    branches:
+      - ui-redesign-browser-20261024
+    paths:
+      - .design/browser-redesign.patch
+      - .github/workflows/apply-browser-redesign.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout redesign branch
+        uses: actions/checkout@v4
+        with:
+          ref: ui-redesign-browser-20261024
+          fetch-depth: 0
+
+      - name: Apply redesign patch
+        shell: bash
+        run: |
+          git apply --check .design/browser-redesign.patch
+          git apply .design/browser-redesign.patch
+
+      - name: Commit implemented UI
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/game/client/components/menus_browser.cpp
+          git commit -m "ui: redesign server browser"
+          git push origin HEAD:ui-redesign-browser-20261024
