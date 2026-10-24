@@ -1,0 +1,286 @@
+diff --git a/src/game/client/components/menus_browser.cpp b/src/game/client/components/menus_browser.cpp
+--- a/src/game/client/components/menus_browser.cpp
++++ b/src/game/client/components/menus_browser.cpp
+@@ -34,7 +34,27 @@
+ #include <vector>
+ // bestclient
+ 
+-static constexpr ColorRGBA HIGHLIGHTED_TEXT_COLOR = ColorRGBA(0.4f, 0.4f, 1.0f, 1.0f);
++namespace BrowserVisual
++{
++static constexpr ColorRGBA Canvas = ColorRGBA(0.063f, 0.078f, 0.094f, 1.0f);
++static constexpr ColorRGBA Surface = ColorRGBA(0.090f, 0.110f, 0.133f, 1.0f);
++static constexpr ColorRGBA SurfaceRaised = ColorRGBA(0.129f, 0.118f, 0.157f, 1.0f);
++static constexpr ColorRGBA SurfaceHover = ColorRGBA(0.165f, 0.157f, 0.196f, 1.0f);
++static constexpr ColorRGBA RowSelected = ColorRGBA(0.251f, 0.200f, 0.247f, 1.0f);
++static constexpr ColorRGBA Control = ColorRGBA(0.106f, 0.125f, 0.149f, 1.0f);
++static constexpr ColorRGBA ControlHover = ColorRGBA(0.153f, 0.173f, 0.204f, 1.0f);
++static constexpr ColorRGBA ControlPressed = ColorRGBA(0.071f, 0.086f, 0.106f, 1.0f);
++static constexpr ColorRGBA Border = ColorRGBA(0.294f, 0.275f, 0.314f, 1.0f);
++static constexpr ColorRGBA Accent = ColorRGBA(0.753f, 0.553f, 0.651f, 1.0f);
++static constexpr ColorRGBA AccentSoft = ColorRGBA(0.651f, 0.604f, 0.753f, 1.0f);
++static constexpr ColorRGBA Secondary = ColorRGBA(0.471f, 0.678f, 0.639f, 1.0f);
++static constexpr ColorRGBA Warm = ColorRGBA(0.835f, 0.702f, 0.416f, 1.0f);
++static constexpr ColorRGBA TextMuted = ColorRGBA(0.667f, 0.643f, 0.655f, 1.0f);
++static constexpr ColorRGBA Success = ColorRGBA(0.494f, 0.741f, 0.533f, 1.0f);
++static constexpr ColorRGBA Warning = ColorRGBA(0.820f, 0.667f, 0.408f, 1.0f);
++static constexpr ColorRGBA Danger = ColorRGBA(0.843f, 0.478f, 0.482f, 1.0f);
++}
++
++static constexpr ColorRGBA HIGHLIGHTED_TEXT_COLOR = BrowserVisual::Accent;
+@@ -62,8 +82,8 @@ static ColorRGBA PlayerBackgroundColor(bool Friend, bool Clan, bool Afk, bool In
+ {
+-	static const ColorRGBA COLORS[] = {ColorRGBA(0.5f, 1.0f, 0.5f), ColorRGBA(0.4f, 0.4f, 1.0f), ColorRGBA(0.75f, 0.75f, 0.75f)};
+-	static const ColorRGBA COLORS_AFK[] = {ColorRGBA(1.0f, 1.0f, 0.5f), ColorRGBA(0.4f, 0.75f, 1.0f), ColorRGBA(0.6f, 0.6f, 0.6f)};
++	static const ColorRGBA COLORS[] = {BrowserVisual::AccentSoft, BrowserVisual::Secondary, BrowserVisual::TextMuted};
++	static const ColorRGBA COLORS_AFK[] = {BrowserVisual::Warm, BrowserVisual::Secondary, BrowserVisual::TextMuted};
+ 	int i;
+ 	if(Friend)
+ 		i = 0;
+@@ -74,7 +94,7 @@ static ColorRGBA PlayerBackgroundColor(bool Friend, bool Clan, bool Afk, bool In
+ 	else
+ 		i = 2;
+-	return (Afk ? COLORS_AFK[i] : COLORS[i]).WithAlpha(0.3f + (Inside ? 0.15f : 0.0f) + (InSelectedServer ? 0.12f : 0.0f));
++	return (Afk ? COLORS_AFK[i] : COLORS[i]).WithAlpha(0.16f + (Inside ? 0.08f : 0.0f) + (InSelectedServer ? 0.10f : 0.0f));
+ }
+@@ -107,7 +127,11 @@ static ColorRGBA GetPingTextColor(int Latency)
+ {
+-	return color_cast<ColorRGBA>(ColorHSLA((300.0f - std::clamp(Latency, 0, 300)) / 1000.0f, 1.0f, 0.5f));
++	if(Latency <= 55)
++		return BrowserVisual::Success;
++	if(Latency <= 110)
++		return BrowserVisual::Warning;
++	return BrowserVisual::Danger;
+ }
+@@ -119,9 +143,9 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
+ 
+ 	CUIRect Headers;
+ 	View.HSplitTop(ms_ListheaderHeight, &Headers, &View);
+-	Headers.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, 0.25f), IGraphics::CORNER_T, 5.0f);
++	Headers.Draw(BrowserVisual::SurfaceRaised.WithAlpha(0.94f), IGraphics::CORNER_T, 4.0f);
+ 	Headers.VSplitRight(s_ListBox.ScrollbarWidthMax(), &Headers, nullptr);
+-	View.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.15f), IGraphics::CORNER_NONE, 0.0f);
++	View.Draw(BrowserVisual::Canvas.WithAlpha(0.80f), IGraphics::CORNER_NONE, 0.0f);
+@@ -251,7 +275,7 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
+ 		else if(Col.m_Id == COL_BESTCLIENT)
+ 		{
+ 			const CUIRect Icon = CenterSquareIcon(Col.m_Rect, 2.0f);
+-			BestClientRenderIndicatorIcon(Graphics(), Icon, false, false, ColorRGBA(1.0f, 1.0f, 1.0f, 0.9f));
++			BestClientRenderIndicatorIcon(Graphics(), Icon, false, false, BrowserVisual::AccentSoft.WithAlpha(0.95f));
+ 		}
+@@ -265,7 +289,9 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
+ 		{
+ 			TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
+ 			TextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_ONLY_ADVANCE_WIDTH | ETextRenderFlags::TEXT_RENDER_FLAG_NO_X_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_Y_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_PIXEL_ALIGNMENT | ETextRenderFlags::TEXT_RENDER_FLAG_NO_OVERSIZE);
++			TextRender()->TextColor(BrowserVisual::Warm);
+ 			Ui()->DoLabel(&Col.m_Rect, FontIcon::STAR, 14.0f, TEXTALIGN_MC);
++			TextRender()->TextColor(TextRender()->DefaultTextColor());
+ 			TextRender()->SetRenderFlags(0);
+ 			TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
+ 		}
+@@ -373,7 +399,7 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
+ 		}
+ 		const bool ShowPreview = PreviewRow && PreviewHeight > 0.5f;
+-		if(ShowPreview && AddressSelected)
++		if(AddressSelected)
+ 			s_ListBox.SuppressNextSelectionHighlight();
+ 		// bestclient
+ 		const CListboxItem ListItem = s_ListBox.DoNextItem(pItem, AddressSelected);
+@@ -383,7 +409,7 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
+ 		// bestclient
+ 		CUIRect PreviewRect;
+-		const ColorRGBA PreviewFrame(1.0f, 1.0f, 1.0f, s_ListBox.Active() ? 0.5f : 0.33f);
++		const ColorRGBA PreviewFrame = BrowserVisual::AccentSoft.WithAlpha(s_ListBox.Active() ? 0.55f : 0.34f);
+ 		if(ShowPreview)
+ 		{
+@@ -410,6 +436,15 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
+ 			continue;
+ 		}
+ 
++		if(AddressSelected && !ShowPreview)
++		{
++			CUIRect Selected = ListItem.m_Rect;
++			Selected.Draw(BrowserVisual::RowSelected.WithAlpha(s_ListBox.Active() ? 0.92f : 0.66f), IGraphics::CORNER_ALL, 3.0f);
++			CUIRect Marker;
++			Selected.VSplitLeft(2.0f, &Marker, nullptr);
++			Marker.Draw(BrowserVisual::Accent, IGraphics::CORNER_L, 2.0f);
++		}
++
+ 		const float FontSize = 12.0f;
+ 		char aTemp[64];
+@@ -427,11 +462,11 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
+ 			{
+ 				if(pItem->m_Flags & SERVER_FLAG_PASSWORD)
+ 				{
+-					RenderBrowserIcons(*pUiElement->Rect(UI_ELEM_LOCK_ICON), &Button, ColorRGBA(0.75f, 0.75f, 0.75f, 1.0f), TextRender()->DefaultTextOutlineColor(), FontIcon::LOCK, TEXTALIGN_MC);
++					RenderBrowserIcons(*pUiElement->Rect(UI_ELEM_LOCK_ICON), &Button, BrowserVisual::TextMuted, TextRender()->DefaultTextOutlineColor(), FontIcon::LOCK, TEXTALIGN_MC);
+ 				}
+ 				else if(pItem->m_RequiresLogin)
+ 				{
+-					RenderBrowserIcons(*pUiElement->Rect(UI_ELEM_KEY_ICON), &Button, ColorRGBA(0.75f, 0.75f, 0.75f, 1.0f), TextRender()->DefaultTextOutlineColor(), FontIcon::KEY, TEXTALIGN_MC);
++					RenderBrowserIcons(*pUiElement->Rect(UI_ELEM_KEY_ICON), &Button, BrowserVisual::TextMuted, TextRender()->DefaultTextOutlineColor(), FontIcon::KEY, TEXTALIGN_MC);
+ 				}
+ 			}
+@@ -441,7 +476,7 @@ void CMenus::RenderServerbrowserServerList(CUIRect View, bool &WasListboxItemAct
+ 			{
+ 				if(pItem->m_Favorite != TRISTATE::NONE)
+ 				{
+-					RenderBrowserIcons(*pUiElement->Rect(UI_ELEM_FAVORITE_ICON), &Button, ColorRGBA(1.0f, 0.85f, 0.3f, 1.0f), TextRender()->DefaultTextOutlineColor(), FontIcon::STAR, TEXTALIGN_MC);
++					RenderBrowserIcons(*pUiElement->Rect(UI_ELEM_FAVORITE_ICON), &Button, BrowserVisual::Warm, TextRender()->DefaultTextOutlineColor(), FontIcon::STAR, TEXTALIGN_MC);
+ 				}
+ 			}
+@@ -662,6 +697,8 @@ void CMenus::RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItem
+ {
++	StatusBox.Draw(BrowserVisual::Surface.WithAlpha(0.94f), IGraphics::CORNER_ALL, 5.0f);
++
+ 	// Render bar that shows the loading progression.
+@@ -678,7 +715,9 @@ void CMenus::RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItem
+ 		const float RefreshBarAlpha = std::min(LoadingProgressionTimeDiff, 0.8f);
+ 		RefreshBar.h = 2.0f;
+ 		RefreshBar.w *= ServerBrowser()->LoadingProgression() / 100.0f;
+-		RefreshBar.Draw(ColorRGBA(1.0f, 1.0f, 1.0f, RefreshBarAlpha), IGraphics::CORNER_NONE, 0.0f);
++		RefreshBar.Draw(BrowserVisual::AccentSoft.WithAlpha(RefreshBarAlpha), IGraphics::CORNER_NONE, 0.0f);
+ 	}
++
++	StatusBox.Margin(4.0f, &StatusBox);
+ 
+@@ -692,12 +731,11 @@ void CMenus::RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItem
+ 	TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
+ 
+ 	CUIRect SearchInfoAndAddr, ServersAndConnect, ServersPlayersOnline, SearchAndInfo, ServerAddr, ConnectButtons;
+-	StatusBox.VSplitRight(135.0f, &SearchInfoAndAddr, &ServersAndConnect);
+-	if(SearchInfoAndAddr.w > 350.0f)
+-		SearchInfoAndAddr.VSplitLeft(350.0f, &SearchInfoAndAddr, nullptr);
++	StatusBox.VSplitRight(230.0f, &SearchInfoAndAddr, &ServersAndConnect);
++	SearchInfoAndAddr.VSplitRight(8.0f, &SearchInfoAndAddr, nullptr);
+ 	SearchInfoAndAddr.HSplitTop(40.0f, &SearchAndInfo, &ServerAddr);
+-	ServersAndConnect.HSplitTop(35.0f, &ServersPlayersOnline, &ConnectButtons);
+-	ConnectButtons.HSplitTop(5.0f, nullptr, &ConnectButtons);
++	ServersAndConnect.HSplitTop(26.0f, &ServersPlayersOnline, &ConnectButtons);
++	ConnectButtons.HSplitTop(3.0f, nullptr, &ConnectButtons);
+@@ -848,12 +886,13 @@ void CMenus::RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItem
+ 	// buttons
+ 	{
+ 		CUIRect ButtonRefresh, ButtonConnect;
+-		ConnectButtons.VSplitMid(&ButtonRefresh, &ButtonConnect, 5.0f);
++		ConnectButtons.VSplitLeft(42.0f, &ButtonRefresh, &ButtonConnect);
++		ButtonConnect.VSplitLeft(6.0f, nullptr, &ButtonConnect);
+ 
+ 		// refresh button
+ 		{
+@@ -869,15 +908,31 @@ void CMenus::RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItem
+-			SMenuButtonProperties Props;
+-			Props.m_HintRequiresStringCheck = true;
+-			Props.m_UseIconFont = true;
+-
+ 			static CButtonContainer s_RefreshButton;
+-			if(Ui()->DoButton_Menu(m_RefreshButton, &s_RefreshButton, RefreshLabelFunc, &ButtonRefresh, Props) || (!Ui()->IsPopupOpen() && (Input()->KeyPress(KEY_F5) || (Input()->KeyPress(KEY_R) && Input()->ModifierIsPressed()))))
++			const int Click = Ui()->DoButtonLogic(&s_RefreshButton, 0, &ButtonRefresh, BUTTONFLAG_LEFT);
++			const bool Hot = Ui()->HotItem() == &s_RefreshButton;
++			const bool Active = Ui()->CheckActiveItem(&s_RefreshButton);
++			ButtonRefresh.Draw(BrowserVisual::Border.WithAlpha(Hot ? 0.85f : 0.55f), IGraphics::CORNER_ALL, 4.0f);
++			CUIRect Inner = ButtonRefresh;
++			Inner.Margin(1.0f, &Inner);
++			Inner.Draw(Active ? BrowserVisual::ControlPressed : (Hot ? BrowserVisual::ControlHover : BrowserVisual::Control), IGraphics::CORNER_ALL, 3.0f);
++			TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
++			TextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_ONLY_ADVANCE_WIDTH | ETextRenderFlags::TEXT_RENDER_FLAG_NO_X_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_Y_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_PIXEL_ALIGNMENT | ETextRenderFlags::TEXT_RENDER_FLAG_NO_OVERSIZE);
++			TextRender()->TextColor(Hot ? BrowserVisual::AccentSoft : BrowserVisual::TextMuted);
++			Ui()->DoLabel(&Inner, RefreshLabelFunc(), 14.0f, TEXTALIGN_MC);
++			TextRender()->TextColor(TextRender()->DefaultTextColor());
++			TextRender()->SetRenderFlags(0);
++			TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
++
++			if(Click || (!Ui()->IsPopupOpen() && (Input()->KeyPress(KEY_F5) || (Input()->KeyPress(KEY_R) && Input()->ModifierIsPressed()))))
+ 			{
+ 				RefreshBrowserTab(true);
+ 			}
+@@ -887,14 +942,37 @@ void CMenus::RenderServerbrowserStatusBox(CUIRect StatusBox, bool WasListboxItem
+ 		// connect button
+ 		{
+-			const auto &&ConnectLabelFunc = []() { return FontIcon::RIGHT_TO_BRACKET; };
+-
+-			SMenuButtonProperties Props;
+-			Props.m_UseIconFont = true;
+-			Props.m_Color = ColorRGBA(0.5f, 1.0f, 0.5f, 0.5f);
+-
+ 			static CButtonContainer s_ConnectButton;
+-			if(Ui()->DoButton_Menu(m_ConnectButton, &s_ConnectButton, ConnectLabelFunc, &ButtonConnect, Props) || WasListboxItemActivated || (!Ui()->IsPopupOpen() && Ui()->ConsumeHotkey(CUi::HOTKEY_ENTER)))
++			const int Click = Ui()->DoButtonLogic(&s_ConnectButton, 0, &ButtonConnect, BUTTONFLAG_LEFT);
++			const bool Hot = Ui()->HotItem() == &s_ConnectButton;
++			const bool Active = Ui()->CheckActiveItem(&s_ConnectButton);
++
++			ButtonConnect.Draw(BrowserVisual::Accent.WithAlpha(Hot ? 0.92f : 0.58f), IGraphics::CORNER_ALL, 4.0f);
++			CUIRect Inner = ButtonConnect;
++			Inner.Margin(1.0f, &Inner);
++			if(Active)
++				Inner.y += 1.0f;
++			Inner.Draw(Active ? BrowserVisual::ControlPressed : (Hot ? BrowserVisual::SurfaceHover : BrowserVisual::SurfaceRaised), IGraphics::CORNER_ALL, 3.0f);
++
++			CUIRect Icon, Label;
++			Inner.VSplitLeft(30.0f, &Icon, &Label);
++			Label.VSplitLeft(4.0f, nullptr, &Label);
++			Label.VSplitRight(10.0f, &Label, nullptr);
++
++			TextRender()->SetFontPreset(EFontPreset::ICON_FONT);
++			TextRender()->SetRenderFlags(ETextRenderFlags::TEXT_RENDER_FLAG_ONLY_ADVANCE_WIDTH | ETextRenderFlags::TEXT_RENDER_FLAG_NO_X_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_Y_BEARING | ETextRenderFlags::TEXT_RENDER_FLAG_NO_PIXEL_ALIGNMENT | ETextRenderFlags::TEXT_RENDER_FLAG_NO_OVERSIZE);
++			TextRender()->TextColor(Hot ? BrowserVisual::Accent : BrowserVisual::AccentSoft);
++			Ui()->DoLabel(&Icon, FontIcon::RIGHT_TO_BRACKET, 13.0f, TEXTALIGN_MC);
++			TextRender()->TextColor(TextRender()->DefaultTextColor());
++			TextRender()->SetRenderFlags(0);
++			TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
++			Ui()->DoLabel(&Label, Localize("Connect"), 13.0f, TEXTALIGN_MC);
++
++			if(Click || WasListboxItemActivated || (!Ui()->IsPopupOpen() && Ui()->ConsumeHotkey(CUi::HOTKEY_ENTER)))
+ 			{
+ 				Connect(g_Config.m_UiServerAddress);
+ 			}
+@@ -2487,8 +2565,8 @@ void CMenus::RenderServerbrowserTabBar(CUIRect TabBar)
+-	const ColorRGBA ColorActive = ColorRGBA(0.0f, 0.0f, 0.0f, 0.3f);
+-	const ColorRGBA ColorInactive = ColorRGBA(0.0f, 0.0f, 0.0f, 0.15f);
++	const ColorRGBA ColorActive = BrowserVisual::SurfaceRaised.WithAlpha(0.95f);
++	const ColorRGBA ColorInactive = BrowserVisual::Canvas.WithAlpha(0.62f);
+@@ -2524,7 +2602,7 @@ void CMenus::RenderServerbrowserTabBar(CUIRect TabBar)
+ 		g_Config.m_UiToolboxPage = UI_TOOLBOX_PAGE_BESTCLIENT;
+ 	}
+-	RenderCenteredBestClientTabIcon(Graphics(), BestClientTabButton, ColorRGBA(1.0f, 1.0f, 1.0f, 0.95f));
++	RenderCenteredBestClientTabIcon(Graphics(), BestClientTabButton, g_Config.m_UiToolboxPage == UI_TOOLBOX_PAGE_BESTCLIENT ? BrowserVisual::AccentSoft : BrowserVisual::TextMuted);
+ 	GameClient()->m_Tooltips.DoToolTip(&s_BestClientTabButton, &BestClientTabButton, Localize("BestClient"));
+@@ -2545,12 +2623,28 @@ void CMenus::RenderServerbrowserTabBar(CUIRect TabBar)
+ 
+ 	TextRender()->SetRenderFlags(0);
+ 	TextRender()->SetFontPreset(EFontPreset::DEFAULT_FONT);
++
++	CUIRect ActiveLine;
++	switch(g_Config.m_UiToolboxPage)
++	{
++	case UI_TOOLBOX_PAGE_FILTERS: ActiveLine = FilterTabButton; break;
++	case UI_TOOLBOX_PAGE_INFO: ActiveLine = InfoTabButton; break;
++	case UI_TOOLBOX_PAGE_BESTCLIENT: ActiveLine = BestClientTabButton; break;
++	case UI_TOOLBOX_PAGE_FRIENDS: ActiveLine = FriendsTabButton; break;
++	default: ActiveLine = FilterTabButton; break;
++	}
++	ActiveLine.HSplitBottom(2.0f, nullptr, &ActiveLine);
++	ActiveLine.VMargin(8.0f, &ActiveLine);
++	ActiveLine.Draw(BrowserVisual::Accent, IGraphics::CORNER_ALL, 1.0f);
+ }
+ 
+ void CMenus::RenderServerbrowserToolBox(CUIRect ToolBox)
+ {
+-	ToolBox.Draw(ColorRGBA(0.0f, 0.0f, 0.0f, 0.3f), IGraphics::CORNER_B, 4.0f);
++	ToolBox.Draw(BrowserVisual::Surface.WithAlpha(0.92f), IGraphics::CORNER_B, 4.0f);
+@@ -2597,10 +2691,10 @@ void CMenus::RenderServerbrowser(CUIRect MainView)
+ 
+ 	CUIRect ServerList, StatusBox, ToolBox, TabBar;
+-	MainView.Draw(ms_ColorTabbarActive, IGraphics::CORNER_B, 10.0f);
+-	MainView.Margin(10.0f, &MainView);
+-	MainView.VSplitRight(205.0f, &ServerList, &ToolBox);
+-	ServerList.VSplitRight(5.0f, &ServerList, nullptr);
++	MainView.Draw(BrowserVisual::Canvas.WithAlpha(0.90f), IGraphics::CORNER_B, 7.0f);
++	MainView.Margin(8.0f, &MainView);
++	MainView.VSplitRight(220.0f, &ServerList, &ToolBox);
++	ServerList.VSplitRight(6.0f, &ServerList, nullptr);
+@@ -2618,7 +2712,7 @@ void CMenus::RenderServerbrowser(CUIRect MainView)
+ 
+ 	ToolBox.HSplitTop(24.0f, &TabBar, &ToolBox);
+-	ServerList.HSplitBottom(65.0f, &ServerList, &StatusBox);
++	ServerList.HSplitBottom(66.0f, &ServerList, &StatusBox);
