@@ -1,6 +1,41 @@
 include(CheckCXXSourceCompiles)
 include(CheckLibraryExists)
 
+# BestClient browser redesign build hook.
+# This is intentionally inert for normal branches. The redesign branch carries
+# .design/browser-redesign.patch and CI applies it once before compiling.
+set(_BESTCLIENT_BROWSER_REDESIGN_PATCH "${PROJECT_SOURCE_DIR}/.design/browser-redesign.patch")
+set(_BESTCLIENT_BROWSER_SOURCE "${PROJECT_SOURCE_DIR}/src/game/client/components/menus_browser.cpp")
+if(EXISTS "${_BESTCLIENT_BROWSER_REDESIGN_PATCH}" AND EXISTS "${_BESTCLIENT_BROWSER_SOURCE}")
+  file(READ "${_BESTCLIENT_BROWSER_SOURCE}" _BESTCLIENT_BROWSER_SOURCE_TEXT)
+  string(FIND "${_BESTCLIENT_BROWSER_SOURCE_TEXT}" "namespace BrowserVisual" _BESTCLIENT_BROWSER_REDESIGN_MARKER)
+  if(_BESTCLIENT_BROWSER_REDESIGN_MARKER EQUAL -1)
+    find_program(_BESTCLIENT_GIT_EXECUTABLE git)
+    if(NOT _BESTCLIENT_GIT_EXECUTABLE)
+      message(FATAL_ERROR "Browser redesign patch is present, but git was not found")
+    endif()
+    execute_process(
+      COMMAND "${_BESTCLIENT_GIT_EXECUTABLE}" apply --check "${_BESTCLIENT_BROWSER_REDESIGN_PATCH}"
+      WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+      RESULT_VARIABLE _BESTCLIENT_BROWSER_PATCH_CHECK
+      ERROR_VARIABLE _BESTCLIENT_BROWSER_PATCH_ERROR
+    )
+    if(NOT _BESTCLIENT_BROWSER_PATCH_CHECK EQUAL 0)
+      message(FATAL_ERROR "Browser redesign patch no longer applies cleanly: ${_BESTCLIENT_BROWSER_PATCH_ERROR}")
+    endif()
+    execute_process(
+      COMMAND "${_BESTCLIENT_GIT_EXECUTABLE}" apply "${_BESTCLIENT_BROWSER_REDESIGN_PATCH}"
+      WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+      RESULT_VARIABLE _BESTCLIENT_BROWSER_PATCH_RESULT
+      ERROR_VARIABLE _BESTCLIENT_BROWSER_PATCH_ERROR
+    )
+    if(NOT _BESTCLIENT_BROWSER_PATCH_RESULT EQUAL 0)
+      message(FATAL_ERROR "Failed to apply browser redesign patch: ${_BESTCLIENT_BROWSER_PATCH_ERROR}")
+    endif()
+    message(STATUS "Applied BestClient native browser redesign")
+  endif()
+endif()
+
 # Sometimes linking against libatomic is required for atomic ops, if
 # the platform doesn't support lock-free atomics.
 
