@@ -2,7 +2,7 @@ name: Temporary UI Redesign Build
 
 on:
   workflow_run:
-    workflows: ["Check style"]
+    workflows: ["Check style", "Spelling"]
     types: [completed]
 
 permissions:
