@@ -2,37 +2,29 @@ include(CheckCXXSourceCompiles)
 include(CheckLibraryExists)
 
 # BestClient browser redesign build hook.
-# This is intentionally inert for normal branches. The redesign branch carries
-# .design/browser-redesign.patch and CI applies it once before compiling.
-set(_BESTCLIENT_BROWSER_REDESIGN_PATCH "${PROJECT_SOURCE_DIR}/.design/browser-redesign.patch")
+# Normal branches are unaffected because the applicator is only present on the
+# dedicated redesign branch. Running it more than once is safe.
+set(_BESTCLIENT_BROWSER_REDESIGN_APPLICATOR "${PROJECT_SOURCE_DIR}/scripts/apply_browser_redesign.py")
 set(_BESTCLIENT_BROWSER_SOURCE "${PROJECT_SOURCE_DIR}/src/game/client/components/menus_browser.cpp")
-if(EXISTS "${_BESTCLIENT_BROWSER_REDESIGN_PATCH}" AND EXISTS "${_BESTCLIENT_BROWSER_SOURCE}")
+if(EXISTS "${_BESTCLIENT_BROWSER_REDESIGN_APPLICATOR}" AND EXISTS "${_BESTCLIENT_BROWSER_SOURCE}")
   file(READ "${_BESTCLIENT_BROWSER_SOURCE}" _BESTCLIENT_BROWSER_SOURCE_TEXT)
   string(FIND "${_BESTCLIENT_BROWSER_SOURCE_TEXT}" "namespace BrowserVisual" _BESTCLIENT_BROWSER_REDESIGN_MARKER)
   if(_BESTCLIENT_BROWSER_REDESIGN_MARKER EQUAL -1)
-    find_program(_BESTCLIENT_GIT_EXECUTABLE git)
-    if(NOT _BESTCLIENT_GIT_EXECUTABLE)
-      message(FATAL_ERROR "Browser redesign patch is present, but git was not found")
+    find_program(_BESTCLIENT_PYTHON_EXECUTABLE NAMES python3 python)
+    if(NOT _BESTCLIENT_PYTHON_EXECUTABLE)
+      message(FATAL_ERROR "Browser redesign applicator is present, but Python was not found")
     endif()
     execute_process(
-      COMMAND "${_BESTCLIENT_GIT_EXECUTABLE}" apply --check "${_BESTCLIENT_BROWSER_REDESIGN_PATCH}"
+      COMMAND "${_BESTCLIENT_PYTHON_EXECUTABLE}" "${_BESTCLIENT_BROWSER_REDESIGN_APPLICATOR}"
       WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-      RESULT_VARIABLE _BESTCLIENT_BROWSER_PATCH_CHECK
-      ERROR_VARIABLE _BESTCLIENT_BROWSER_PATCH_ERROR
+      RESULT_VARIABLE _BESTCLIENT_BROWSER_APPLY_RESULT
+      OUTPUT_VARIABLE _BESTCLIENT_BROWSER_APPLY_OUTPUT
+      ERROR_VARIABLE _BESTCLIENT_BROWSER_APPLY_ERROR
     )
-    if(NOT _BESTCLIENT_BROWSER_PATCH_CHECK EQUAL 0)
-      message(FATAL_ERROR "Browser redesign patch no longer applies cleanly: ${_BESTCLIENT_BROWSER_PATCH_ERROR}")
+    if(NOT _BESTCLIENT_BROWSER_APPLY_RESULT EQUAL 0)
+      message(FATAL_ERROR "Failed to apply native browser redesign:\n${_BESTCLIENT_BROWSER_APPLY_OUTPUT}\n${_BESTCLIENT_BROWSER_APPLY_ERROR}")
     endif()
-    execute_process(
-      COMMAND "${_BESTCLIENT_GIT_EXECUTABLE}" apply "${_BESTCLIENT_BROWSER_REDESIGN_PATCH}"
-      WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-      RESULT_VARIABLE _BESTCLIENT_BROWSER_PATCH_RESULT
-      ERROR_VARIABLE _BESTCLIENT_BROWSER_PATCH_ERROR
-    )
-    if(NOT _BESTCLIENT_BROWSER_PATCH_RESULT EQUAL 0)
-      message(FATAL_ERROR "Failed to apply browser redesign patch: ${_BESTCLIENT_BROWSER_PATCH_ERROR}")
-    endif()
-    message(STATUS "Applied BestClient native browser redesign")
+    message(STATUS "${_BESTCLIENT_BROWSER_APPLY_OUTPUT}")
   endif()
 endif()
 
