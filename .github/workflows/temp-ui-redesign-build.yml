@@ -1,6 +1,8 @@
 name: Temporary UI Redesign Build
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
   workflow_run:
     workflows: ["Check style", "Spelling"]
     types: [completed]
