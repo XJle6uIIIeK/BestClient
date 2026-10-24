@@ -1,0 +1,60 @@
+name: Build UI Redesign
+
+on:
+  issues:
+    types: [opened, reopened, labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    if: startsWith(github.event.issue.title, '[build-ui-redesign]')
+    runs-on: windows-latest
+    steps:
+      - name: Checkout redesign branch
+        uses: actions/checkout@v4
+        with:
+          ref: ui-redesign-browser-20261024
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Apply native browser redesign
+        shell: bash
+        run: |
+          git apply --check .design/browser-redesign.patch
+          git apply .design/browser-redesign.patch
+          git diff --check
+
+      - name: Install Vulkan SDK
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: 1.3.296.0
+          cache: true
+
+      - name: Configure release
+        shell: pwsh
+        run: >-
+          cmake -S . -B release -A x64
+          -DCMAKE_BUILD_TYPE=Release
+          -DDISCORD=OFF
+          -DTOOLS=OFF
+          -DAUTOUPDATE=OFF
+          -DVULKAN=ON
+          -DDOWNLOAD_GTEST=OFF
+          -DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE=.
+
+      - name: Build client and data
+        shell: pwsh
+        run: cmake --build release --config Release --target everything --parallel 2
+
+      - name: Package win64
+        shell: pwsh
+        run: cmake --build release --config Release --target package_default
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: bestclient-ui-redesign-win64
+          path: release/*-win64.zip
+          if-no-files-found: error
